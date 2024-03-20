@@ -90,8 +90,10 @@ class Client:
 client = Client(HOST, PORT)
 '''
 
-# `TODO : add GUI for login or register
-# `TODO : add GUI for username & password 
+# // TODO : add GUI for login or register
+# // TODO : add GUI for username & password 
+# TODO : hide password entries
+# ! TODO : polish retry login after fail - some uncaught exception / logic err
 
 import socket
 import threading
@@ -123,7 +125,6 @@ class Client:
         screenheight = self.login_or_register_win.winfo_screenheight()
         alignstr = '%dx%d+%d+%d' % (width, height, (screenwidth - width) / 2, (screenheight - height) / 2)
         self.login_or_register_win.geometry(alignstr)
-
 
         self.login_button = tk.Button(self.login_or_register_win, text="Login", command=self.login_gui)
         self.login_button.config(font=("Arial", 12))
@@ -175,6 +176,9 @@ class Client:
 
         self.login_win.mainloop()
 
+        #login_thread = threading.Thread(target=self.login)
+        #login_thread.start()
+
     # * This function is to ask users for username, password and confirm
     # * password for register
     def register_gui(self):
@@ -221,6 +225,9 @@ class Client:
 
         self.register_win.mainloop()
 
+        #register_thread = threading.Thread(target=self.register)
+        #register_thread.start()
+
     # * This function is to get input from login_gui funct and send to
     # * server for verification
     # ? After login, this function will goto message_gui
@@ -249,16 +256,25 @@ class Client:
 
             gui_thread.start()
             receive_thread.start()
+
+            gui_thread.join()
+            receive_thread.join()
         else:
             messagebox.showerror(title="Error", message="Your username and/or password is incorrect!")
+
+            # ! for some reason, retry after login will result in conn drop
+            # ? temp solution is to close the current conn and re-init the conn
+            self.sock.close()
+
             self.login_win.destroy()
 
-            self.login_or_register_gui()
+            self.__init__(HOST, PORT)
 
     # * This function is to get input from register_gui funct and send to
     # * server for verification
     # ? After register, this function will goto login_or_register_gui
-    # ! If login fail, this function will goto login_or_register_gui
+    # ! If register fail, this function will either display err msg
+    # ! or goto login_or_register_gui
     def register(self):
         self.username = self.username_input.get('1.0', 'end-1c')
         self.password = self.password_input.get('1.0', 'end-1c')
@@ -272,23 +288,28 @@ class Client:
             register_response = self.sock.recv(1024).decode('utf-8')
             if register_response == "REGISTER_SUCCESS":
                 messagebox.showinfo(title="Info", message="Registration complete. Please log in using your username and password.")
+                
+                # ! same handle case as login, close and re-init conn after exit win
+                self.sock.close()
                 self.register_win.destroy()
+                self.__init__(HOST, PORT)
             else:
                 tk.messagebox.showerror(title="Error", message="Registration Failed!")
-                self.register_win.destroy()
 
-                self.login_or_register_gui()
+                # ! same handle case as login, close and re-init conn after exit win
+                self.sock.close()
+                self.register_win.destroy()
+                self.__init__(HOST, PORT)
         else:
             tk.messagebox.showerror(title="Error", message="Please double confirm your password!")
-            self.register_win.destroy()
-
-            self.login_or_register_gui()
+            self.password_input.delete('1.0', 'end')
+            self.confirm_password_input.delete('1.0', 'end')
 
     # * This function is to get input from user message and display message
     # * from other users
     def message_gui(self):
         self.win = tk.Tk()
-        self.login_win.title("Message")
+        self.win.title("Message")
         self.win.configure(bg="lightgreen")
 
         width = 600
@@ -352,6 +373,7 @@ class Client:
 
     def stop(self):
         self.running = False
+
         self.win.destroy()
         self.sock.close()
         exit(0)
