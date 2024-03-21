@@ -94,6 +94,7 @@ client = Client(HOST, PORT)
 # // TODO : add GUI for username & password 
 # TODO : hide password entries
 # ! TODO : polish retry login after fail - some uncaught exception / logic err
+# ! TODO : polish clean exit - threading err
 
 import socket
 import threading
@@ -186,7 +187,7 @@ class Client:
         self.sock.send("register".encode('utf-8'))
 
         self.register_win = tk.Tk()
-        self.register_win.title("Login")
+        self.register_win.title("Register")
         self.register_win.configure(bg="lightgreen")
 
         width = 600
@@ -210,14 +211,14 @@ class Client:
         self.password_input = tk.Text(self.register_win, height=3)
         self.password_input.pack(padx=20, pady=5)
 
-        self.confirm_password_label = tk.Label(self.register_win, text="Password :", bg="lightgreen")
+        self.confirm_password_label = tk.Label(self.register_win, text="Confirm Password :", bg="lightgreen")
         self.confirm_password_label.config(font=("Arial", 12))
         self.confirm_password_label.pack(padx=20, pady=5)
 
         self.confirm_password_input = tk.Text(self.register_win, height=3)
         self.confirm_password_input.pack(padx=20, pady=5)
 
-        self.send_button = tk.Button(self.register_win, text="Login", command=self.register)
+        self.send_button = tk.Button(self.register_win, text="Register", command=self.register)
         self.send_button.config(font=("Arial", 12))
         self.send_button.pack(padx=20, pady=5)
 
@@ -280,7 +281,9 @@ class Client:
         self.password = self.password_input.get('1.0', 'end-1c')
         self.confirm_password = self.confirm_password_input.get('1.0', 'end-1c')
 
-        if self.password == self.confirm_password:
+        # ! input might get sanitized here
+
+        if self.password == self.confirm_password and (len(self.password) != 0 and len(self.confirm_password) != 0):
             register_data = f"{self.username} {self.password}"
             self.sock.send(register_data.encode('utf-8'))
 
@@ -308,7 +311,8 @@ class Client:
     # * This function is to get input from user message and display message
     # * from other users
     def message_gui(self):
-        self.win = tk.Tk()
+        self.win = tk.Toplevel()
+        #self.win.configure()
         self.win.title("Message")
         self.win.configure(bg="lightgreen")
 
@@ -373,7 +377,6 @@ class Client:
 
     def stop(self):
         self.running = False
-
         self.win.destroy()
         self.sock.close()
         exit(0)
