@@ -65,6 +65,14 @@ import sqlite3
 import hashlib
 import secrets
 
+from Crypto.PublicKey import ECC
+from Crypto.Protocol.DH import key_agreement
+from Crypto.Hash import SHAKE128
+from Crypto.Cipher import AES
+from Crypto.Util.Padding import unpad
+
+from kyber import Kyber1024
+
 HOST = '127.0.0.1'
 PORT = 9090
 
@@ -90,6 +98,72 @@ cursor.execute('''
     )
 ''')
 conn.commit()
+
+def banner():
+    print('''
+                                                                      
+
+$$$$$$$\   $$$$$$\   $$$$$$\  $$$$$$$$\ $$$$$$$\         $$$$$$\                                                    
+$$  __$$\ $$  __$$\ $$  __$$\ $$  _____|$$  __$$\       $$  __$$\                                                   
+$$ |  $$ |$$ /  $$ |$$ /  \__|$$ |      $$ |  $$ |      $$ /  \__| $$$$$$\   $$$$$$\ $$\    $$\  $$$$$$\   $$$$$$\  
+$$$$$$$\ |$$$$$$$$ |\$$$$$$\  $$$$$\    $$ |  $$ |      \$$$$$$\  $$  __$$\ $$  __$$\\$$\  $$  |$$  __$$\ $$  __$$\ 
+$$  __$$\ $$  __$$ | \____$$\ $$  __|   $$ |  $$ |       \____$$\ $$$$$$$$ |$$ |  \__|\$$\$$  / $$$$$$$$ |$$ |  \__|
+$$ |  $$ |$$ |  $$ |$$\   $$ |$$ |      $$ |  $$ |      $$\   $$ |$$   ____|$$ |       \$$$  /  $$   ____|$$ |      
+$$$$$$$  |$$ |  $$ |\$$$$$$  |$$$$$$$$\ $$$$$$$  |      \$$$$$$  |\$$$$$$$\ $$ |        \$  /   \$$$$$$$\ $$ |      
+\_______/ \__|  \__| \______/ \________|\_______/        \______/  \_______|\__|         \_/     \_______|\__|      
+                                                                                                                    
+                                                                                                                    
+                                                                                                                    
+''')
+
+def server_keygen():
+    # Gen server-side keypair
+    server_key = ECC.generate(curve='ed25519')
+
+    # set keypair to session
+    server_key_public = server_key.public_key()
+    server_key_private = server_key
+
+    # export server keypair
+    print("\n\nVERSION vx.x - Unauthorized Access is Prohibited.")
+    print("\nserver_keygen() >>>")
+
+    # export server private key
+    with open("server_key_private.pem", "wt") as f:
+        
+        data = server_key.export_key(format='PEM',
+                                    protection='PBKDF2WithHMAC-SHA512AndAES256-CBC',
+                                    prot_params={'iteration_count':131072})
+        f.write(data)
+        f.close()
+        
+    # export server public key
+    with open("server_key_public.pem", "wt") as f:
+        server_key_public = server_key.public_key().export_key(format='PEM')
+        f.write(data)
+        f.close()
+
+def server_PQ_keygen():
+    server_pq_key_public, server_pq_key_private = Kyber1024.keygen()
+
+    return server_pq_key_public, server_pq_key_private
+
+def read_server_private_key():
+    with open("server_key_private.pem", "rt") as f:
+        data = f.read()
+        server_key_private = ECC.import_key(data)
+
+    return server_key_private
+
+def read_server_public_key():
+    with open("server_key_public.pem", "rt") as f:
+        data = f.read()
+        server_key_public = ECC.import_key(data)
+
+    return server_key_public
+
+def kdf(x):
+    return SHAKE128.new(x).read(32)
 
 def generate_salt():
     return secrets.token_hex(16)
@@ -134,7 +208,31 @@ def receive():
 
             # ! remove send message to client
             #client.send("LOGIN".encode('utf-8'))
-            login_data = client.recv(1024).decode('utf-8').split()
+
+            # ? before receive, perform ecdh here?
+            server_key_public = read_server_public_key()
+            server_key_private = read_server_private_key()
+
+            # import user_key_public from user
+            user_key_public = ECC.import_key(client.recv(1024).decode('utf-8'))
+
+            # export server_key_public as PEM send to user
+            client.send(str(server_key_public.export_key(format='PEM')).encode('utf-8'))
+
+            # perform ecdh on server-client
+            session_key = key_agreement(static_priv=server_key_private,
+                                        static_pub=user_key_public,
+                                        kdf=kdf)
+
+            #print(session_key)
+
+            login_data = client.recv(1024)
+            iv = client.recv(1024)
+
+            cipher = AES.new(session_key, AES.MODE_CBC, iv)
+            login_data = unpad(cipher.decrypt(login_data), AES.block_size)
+
+            login_data = login_data.decode('utf-8').split()
 
             try:
                 username = login_data[0]
@@ -199,5 +297,8 @@ def receive():
         else:
             client.send("INVALID_OPTION".encode('utf-8'))
 
-print("Server is running!")
+banner()
+server_keygen()
+server_PQ_keygen()
+print("\nServer is running!")
 receive()

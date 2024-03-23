@@ -93,6 +93,7 @@ client = Client(HOST, PORT)
 # // TODO : add GUI for login or register
 # // TODO : add GUI for username & password 
 # TODO : hide password entries
+# TODO : start init. encrypt on login/register on conn
 # ! TODO : polish retry login after fail - some uncaught exception / logic err
 # ! TODO : polish clean exit - threading err
 
@@ -103,8 +104,18 @@ import tkinter.scrolledtext
 from tkinter import simpledialog
 from tkinter import messagebox
 
+from Crypto.PublicKey import ECC
+from Crypto.Protocol.DH import key_agreement
+from Crypto.Hash import SHAKE128
+from Crypto.Cipher import AES
+from Crypto.Util.Padding import pad
+from base64 import b64encode, b64decode
+
 HOST = '127.0.0.1'
 PORT = 9090
+
+def kdf(x):
+        return SHAKE128.new(x).read(32)
 
 class Client:
 
@@ -113,6 +124,15 @@ class Client:
         self.sock.connect((host, port))
 
         self.login_or_register_gui()
+
+    def user_keygen(self):
+
+        # Gen user-side keypair
+        user_key = ECC.generate(curve='ed25519')
+
+        # set keypair to session
+        self.user_key_public = user_key.public_key()
+        self.user_key_private = user_key
 
     # * This function is to ask users whether to login or register
     def login_or_register_gui(self):
@@ -240,7 +260,27 @@ class Client:
         # ! input might get sanitized here
 
         login_data = f"{self.username} {self.password}"
-        self.sock.send(login_data.encode('utf-8'))
+
+        # ? before send, perform ecdh here?
+        self.user_keygen()
+
+        # export user_key_public as PEM and send to server
+        self.sock.send(str(self.user_key_public.export_key(format='PEM')).encode('utf-8'))
+
+        # import server_key_public from server
+        server_key_public = ECC.import_key(self.sock.recv(1024).decode('utf-8'))
+
+        # perform ecdh on client-server
+        session_key = key_agreement(static_priv=self.user_key_private,
+                                        static_pub=server_key_public,
+                                        kdf=kdf)
+        #print(session_key)
+
+        cipher = AES.new(session_key, AES.MODE_CBC)
+        login_data = cipher.encrypt(pad(login_data.encode('utf-8'), AES.block_size))
+
+        self.sock.send(login_data)
+        self.sock.send(cipher.iv)
 
         # Wait for server response
         login_response = self.sock.recv(1024).decode('utf-8')
@@ -311,7 +351,7 @@ class Client:
     # * This function is to get input from user message and display message
     # * from other users
     def message_gui(self):
-        self.win = tk.Toplevel()
+        self.win = tk.Tk()
         #self.win.configure()
         self.win.title("Message")
         self.win.configure(bg="lightgreen")
