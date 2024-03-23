@@ -93,29 +93,31 @@ client = Client(HOST, PORT)
 # // TODO : add GUI for login or register
 # // TODO : add GUI for username & password 
 # TODO : hide password entries
-# TODO : start init. encrypt on login/register on conn
-# ! TODO : polish retry login after fail - some uncaught exception / logic err
+# // TODO : start init. encrypt on login on conn
+# TODO : start init. encrypt on register on conn
+# // TODO : polish retry login after fail - some uncaught exception / logic err
+# // TODO : clean up encryption method in separate funct
 # ! TODO : polish clean exit - threading err
 
+### These libs are used for basic funct - network and threading
 import socket
 import threading
+
+### These libs are used for GUI generation
 import tkinter as tk
 import tkinter.scrolledtext
 from tkinter import simpledialog
 from tkinter import messagebox
 
+### These libs are used for conv. symm / asymm op.
 from Crypto.PublicKey import ECC
 from Crypto.Protocol.DH import key_agreement
 from Crypto.Hash import SHAKE128
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad
-from base64 import b64encode, b64decode
 
 HOST = '127.0.0.1'
 PORT = 9090
-
-def kdf(x):
-        return SHAKE128.new(x).read(32)
 
 class Client:
 
@@ -125,6 +127,9 @@ class Client:
 
         self.login_or_register_gui()
 
+    # * This function is to generate an ECC ed25519 keypair for client
+    # ? client keypairs are all stored in memory
+    # ? client keypairs are always generated each time invoked
     def user_keygen(self):
 
         # Gen user-side keypair
@@ -133,6 +138,31 @@ class Client:
         # set keypair to session
         self.user_key_public = user_key.public_key()
         self.user_key_private = user_key
+
+    def kdf(self, x):
+        return SHAKE128.new(x).read(32)
+
+    def init_ecdh(self):
+        self.user_keygen()
+
+        # export user_key_public as PEM and send to server
+        self.sock.send(str(self.user_key_public.export_key(format='PEM')).encode('utf-8'))
+
+        # import server_key_public from server
+        server_key_public = ECC.import_key(self.sock.recv(1024).decode('utf-8'))
+
+        # perform ecdh on client-server
+        session_key = key_agreement(static_priv=self.user_key_private,
+                                        static_pub=server_key_public,
+                                        kdf=self.kdf)
+        return session_key
+
+    def init_encrypt(self, session_key, login_data):
+        cipher = AES.new(session_key, AES.MODE_CBC)
+        login_data = cipher.encrypt(pad(login_data.encode('utf-8'), AES.block_size))
+
+        self.sock.send(login_data)
+        self.sock.send(cipher.iv)
 
     # * This function is to ask users whether to login or register
     def login_or_register_gui(self):
@@ -261,26 +291,10 @@ class Client:
 
         login_data = f"{self.username} {self.password}"
 
-        # ? before send, perform ecdh here?
-        self.user_keygen()
-
-        # export user_key_public as PEM and send to server
-        self.sock.send(str(self.user_key_public.export_key(format='PEM')).encode('utf-8'))
-
-        # import server_key_public from server
-        server_key_public = ECC.import_key(self.sock.recv(1024).decode('utf-8'))
-
-        # perform ecdh on client-server
-        session_key = key_agreement(static_priv=self.user_key_private,
-                                        static_pub=server_key_public,
-                                        kdf=kdf)
-        #print(session_key)
-
-        cipher = AES.new(session_key, AES.MODE_CBC)
-        login_data = cipher.encrypt(pad(login_data.encode('utf-8'), AES.block_size))
-
-        self.sock.send(login_data)
-        self.sock.send(cipher.iv)
+        # initial KEP and encryption on login data
+        # ? encrypted data will be sent on encrypt()
+        session_key = self.init_ecdh()
+        self.init_encrypt(session_key, login_data)
 
         # Wait for server response
         login_response = self.sock.recv(1024).decode('utf-8')

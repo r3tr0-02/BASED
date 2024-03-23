@@ -57,20 +57,27 @@ receive()
 '''
 
 # `TODO : switch hashlib to argon2 properly
-# `TODO : start initial encryption between server-client in handling login/register inputs
+# // TODO : start initial encryption between server-client in handling login/register inputs
+# TODO : start initial encryption between server-client in handling register
+# // TODO : clean up encryption method in separate funct
 
+### These libs are used for basic funct - network and threading
 import socket
 import threading
+
+### These libs are used for username, password and salt handling and storing
 import sqlite3
 import hashlib
 import secrets
 
+### These libs are used for conv. symm / asymm op.
 from Crypto.PublicKey import ECC
 from Crypto.Protocol.DH import key_agreement
 from Crypto.Hash import SHAKE128
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import unpad
 
+### These libs are used for Post-Quantum op.
 from kyber import Kyber1024
 
 HOST = '127.0.0.1'
@@ -99,6 +106,7 @@ cursor.execute('''
 ''')
 conn.commit()
 
+# * This function is to display server's message banner
 def banner():
     print('''
                                                                       
@@ -116,6 +124,10 @@ $$$$$$$  |$$ |  $$ |\$$$$$$  |$$$$$$$$\ $$$$$$$  |      \$$$$$$  |\$$$$$$$\ $$ |
                                                                                                                     
 ''')
 
+# * This function is to generate an ECC ed25519 keypair for server
+# ? server keypairs are stored locally in .pem files
+# ! server keypairs are not encrypted with passphrase
+# ? server keypairs are re-generated each runtime 
 def server_keygen():
     # Gen server-side keypair
     server_key = ECC.generate(curve='ed25519')
@@ -143,11 +155,15 @@ def server_keygen():
         f.write(data)
         f.close()
 
+# * This function is to generate a Kyber-1024 keypair for server
+# ? server keypairs are stored in memory
+# ? server keypairs are re-generated each runtime 
 def server_PQ_keygen():
     server_pq_key_public, server_pq_key_private = Kyber1024.keygen()
 
     return server_pq_key_public, server_pq_key_private
 
+# * This function is to get server private key from .pem file
 def read_server_private_key():
     with open("server_key_private.pem", "rt") as f:
         data = f.read()
@@ -155,6 +171,7 @@ def read_server_private_key():
 
     return server_key_private
 
+# * This function is to get server public key from .pem file
 def read_server_public_key():
     with open("server_key_public.pem", "rt") as f:
         data = f.read()
@@ -162,19 +179,59 @@ def read_server_public_key():
 
     return server_key_public
 
+# * This function is for Key Derivation Function for ECDH op.
 def kdf(x):
     return SHAKE128.new(x).read(32)
 
+# * This function is to perform initial ECDH KEP on server-client
+# ? This function will return a shared session key
+def init_ecdh(client):
+    # read server keypair for op.
+    server_key_public = read_server_public_key()
+    server_key_private = read_server_private_key()
+
+    # import user_key_public from user
+    user_key_public = ECC.import_key(client.recv(1024).decode('utf-8'))
+
+    # export server_key_public as PEM send to user
+    client.send(str(server_key_public.export_key(format='PEM')).encode('utf-8'))
+
+    # perform ecdh on server-client
+    session_key = key_agreement(static_priv=server_key_private,
+                                static_pub=user_key_public,
+                                kdf=kdf)
+    
+    return session_key
+
+# * This function is to perform initial decryption of user data
+# ? This function will return decrypted user data
+def init_decrypt(client, session_key):
+    # receive ct of login data from user and iv used during enc
+    login_data = client.recv(1024)
+    iv = client.recv(1024)
+
+    # init AES and attempt to decrypt ct using session_key
+    # decrypted ct will be unpad to return to pt
+    cipher = AES.new(session_key, AES.MODE_CBC, iv)
+    login_data = unpad(cipher.decrypt(login_data), AES.block_size)
+
+    return login_data
+
+# * This function is to generate a random 16-byte salt for pass hash
 def generate_salt():
     return secrets.token_hex(16)
 
+# * This function is to generate a SHA-256 hash from password input and hash
 def hash_password(password, salt):
     return hashlib.sha256((password + salt).encode('utf-8')).hexdigest()
 
+# * This function is to send message to all clients conn to server
 def broadcast(message):
     for client in clients:
         client.send(message)
 
+# * This function is to try invoke broadcast funct.
+# ! if a client exits, server will close conn. with client
 def handle(client):
     while True:
         try:
@@ -193,6 +250,10 @@ def handle(client):
 
             break
 
+# * This function is to accept incoming conn from client
+# * and handle login or register of client
+# ? if success login, handle funct will be invoked
+# ! else of fail login or register, server will return err msg
 def receive():
     while True:
         client, address = server.accept()
@@ -209,28 +270,9 @@ def receive():
             # ! remove send message to client
             #client.send("LOGIN".encode('utf-8'))
 
-            # ? before receive, perform ecdh here?
-            server_key_public = read_server_public_key()
-            server_key_private = read_server_private_key()
-
-            # import user_key_public from user
-            user_key_public = ECC.import_key(client.recv(1024).decode('utf-8'))
-
-            # export server_key_public as PEM send to user
-            client.send(str(server_key_public.export_key(format='PEM')).encode('utf-8'))
-
-            # perform ecdh on server-client
-            session_key = key_agreement(static_priv=server_key_private,
-                                        static_pub=user_key_public,
-                                        kdf=kdf)
-
-            #print(session_key)
-
-            login_data = client.recv(1024)
-            iv = client.recv(1024)
-
-            cipher = AES.new(session_key, AES.MODE_CBC, iv)
-            login_data = unpad(cipher.decrypt(login_data), AES.block_size)
+            # initial KEP and decryption on login data
+            session_key = init_ecdh(client)
+            login_data = init_decrypt(client, session_key)
 
             login_data = login_data.decode('utf-8').split()
 
