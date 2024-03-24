@@ -125,6 +125,7 @@ class Client:
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.connect((host, port))
 
+        self.user_keygen()
         self.login_or_register_gui()
 
     # * This function is to generate an ECC ed25519 keypair for client
@@ -142,9 +143,10 @@ class Client:
     def kdf(self, x):
         return SHAKE128.new(x).read(32)
 
+    # * This function is to perform initial ECDH KEP on client-server
+    # ? This function will return a shared session key
     def init_ecdh(self):
-        self.user_keygen()
-
+        
         # export user_key_public as PEM and send to server
         self.sock.send(str(self.user_key_public.export_key(format='PEM')).encode('utf-8'))
 
@@ -157,11 +159,13 @@ class Client:
                                         kdf=self.kdf)
         return session_key
 
-    def init_encrypt(self, session_key, login_data):
+    # * This function is to perform initial encryption of user data
+    # ? This function will return decrypted user data
+    def init_encrypt(self, session_key, data):
         cipher = AES.new(session_key, AES.MODE_CBC)
-        login_data = cipher.encrypt(pad(login_data.encode('utf-8'), AES.block_size))
+        data = cipher.encrypt(pad(data.encode('utf-8'), AES.block_size))
 
-        self.sock.send(login_data)
+        self.sock.send(data)
         self.sock.send(cipher.iv)
 
     # * This function is to ask users whether to login or register
@@ -339,7 +343,11 @@ class Client:
 
         if self.password == self.confirm_password and (len(self.password) != 0 and len(self.confirm_password) != 0):
             register_data = f"{self.username} {self.password}"
-            self.sock.send(register_data.encode('utf-8'))
+            
+            # initial KEP and encryption on login data
+            # ? encrypted data will be sent on encrypt()
+            session_key = self.init_ecdh()
+            self.init_encrypt(session_key, register_data)
 
             # Wait for server response
             register_response = self.sock.recv(1024).decode('utf-8')

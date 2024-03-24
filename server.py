@@ -317,7 +317,11 @@ def receive():
         elif login_or_register.lower() == 'register':
             # ! remove send message to client
             #client.send("REGISTER".encode('utf-8'))
-            register_data = client.recv(1024).decode('utf-8').split()
+
+            session_key = init_ecdh(client)
+            register_data = init_decrypt(client, session_key)
+
+            register_data = register_data.decode('utf-8').split()
 
             try:
                 username = register_data[0]
