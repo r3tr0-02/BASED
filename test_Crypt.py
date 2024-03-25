@@ -226,17 +226,17 @@ else:
     if ss_pq_a == pt_pq_b: print("pt == ss ok")
     else: print("not ok")
 
-    dh_1 = key_agreement(static_priv=b_id_key_private, static_pub=a_spk_key_public, kdf=kdf)
-    dh_2 = key_agreement(static_priv=b_ep_key_private, static_pub=a_id_key_public, kdf=kdf)
-    dh_3 = key_agreement(static_priv=b_ep_key_private, static_pub=a_spk_key_public, kdf=kdf)
-    dh_4 = key_agreement(static_priv=b_ep_key_private, static_pub=a_opk_key, kdf=kdf)
+    dh_1 = key_agreement(static_priv=b_spk_key_private, static_pub=a_id_key_public, kdf=kdf)
+    dh_2 = key_agreement(static_priv=b_id_key_private, static_pub=a_ep_key_public, kdf=kdf)
+    dh_3 = key_agreement(static_priv=b_spk_key_private, static_pub=a_ep_key_public, kdf=kdf)
+    dh_4 = key_agreement(static_priv=b_opk_key_private, static_pub=a_ep_key_public, kdf=kdf)
 
-    print("dh_1 : ", dh_1)
-    print("dh_2 : ", dh_2)
-    print("dh_3 : ", dh_3)
-    print("dh_4 : ", dh_4)
+    #print("dh_1 : ", dh_1)
+    #print("dh_2 : ", dh_2)
+    #print("dh_3 : ", dh_3)
+    #print("dh_4 : ", dh_4)
 
-    print(dh_1 + dh_2 + dh_3 + dh_4 + pt_pq_b)
+    #print(dh_1 + dh_2 + dh_3 + dh_4 + pt_pq_b)
 
     sk_b = kdf(dh_1 + dh_2 + dh_3 + dh_4 + pt_pq_b)
     print("sk for Bob : ", sk_b)
