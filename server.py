@@ -58,10 +58,13 @@ receive()
 
 # `TODO : switch hashlib to argon2 properly
 # // TODO : start initial encryption between server-client in handling login/register inputs
-# TODO : start initial encryption between server-client in handling register
+# // TODO : start initial encryption between server-client in handling register
+# TODO : storing user keys into db on register
+# TODO : retrieve user keys from db on login 
 # // TODO : clean up encryption method in separate funct
 
 ### These libs are used for basic funct - network and threading
+import base64
 import socket
 import threading
 
@@ -79,6 +82,7 @@ from Crypto.Util.Padding import unpad
 
 ### These libs are used for Post-Quantum op.
 from kyber import Kyber1024
+from pqc.sign import dilithium5
 
 HOST = '127.0.0.1'
 PORT = 9090
@@ -99,10 +103,43 @@ cursor = conn.cursor()
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        
         username TEXT,
         password TEXT,
         salt TEXT
-    )
+    );
+''')
+
+conn.commit()
+
+cursor.execute('''
+    CREATE TABLE IF NOT EXISTS keys (
+        user_id INTEGER PRIMARY KEY,
+
+        id_key_public TEXT,
+        id_key_private TEXT,
+
+        pqid_pkey TEXT,
+        pqid_skey TEXT,
+
+        spk_key_public TEXT,
+        spk_key_private TEXT,
+
+        sig_spk TEXT,
+
+        pqspk_pkey TEXT,
+        pqspk_skey TEXT,
+
+        sig_pqspk TEXT,
+
+        opk_key_public TEXT,
+        opk_key_private TEXT,
+
+        pqopk_pkey TEXT,
+        pqopk_skey TEXT,
+
+        sig_pqopk TEXT
+    );
 ''')
 conn.commit()
 
@@ -291,7 +328,7 @@ def receive():
                     hashed_password = hash_password(password, salt)
 
                     # Verify login credentials
-                    cursor.execute('SELECT username, password FROM users WHERE username = ? AND password = ?', (username, hashed_password))
+                    cursor.execute('SELECT username, password FROM users WHERE username = ? AND password = ?;', (username, hashed_password))
                     user_data = cursor.fetchone()
 
                     if user_data:
@@ -336,7 +373,105 @@ def receive():
                 hashed_password = hash_password(password, salt)
 
                 # Insert new user into the database
-                cursor.execute('INSERT INTO users (username, password, salt) VALUES (?, ?, ?)', (username, hashed_password, salt))
+                cursor.execute('INSERT INTO users (username, password, salt) VALUES (?, ?, ?);', (username, hashed_password, salt))
+                conn.commit()
+
+                cursor.execute('SELECT id from users WHERE username = ?;', (username,))
+                user_id = cursor.fetchone()
+
+                id_key_public = client.recv(1024).decode('utf-8')
+                id_key_private = client.recv(1024).decode('utf-8')
+
+                print("ok 1")
+                
+                pqid_pkey = base64.b64decode(client.recv(1024))
+                pqid_skey = base64.b64decode(client.recv(1024))
+
+                print("ok 2")
+
+                spk_key_public = client.recv(1024).decode('utf-8')
+                spk_key_private = client.recv(1024).decode('utf-8')
+
+                print("ok 3")
+
+                sig_spk = base64.b64decode(client.recv(1024))
+
+                print("ok 4")
+
+                pqspk_pkey = base64.b64decode(client.recv(1024))
+                pqspk_skey = base64.b64decode(client.recv(1024))
+
+                print("ok 5")
+
+                sig_pqspk = base64.b64decode(client.recv(1024))
+
+                print("ok 6")
+
+                opk_key_public = client.recv(1024).decode('utf-8')
+                opk_key_private = client.recv(1024).decode('utf-8')
+
+                print("ok 7")
+
+                pqopk_pkey = base64.b64decode(client.recv(2048))
+                pqopk_skey = base64.b64decode(client.recv(2048))
+
+                print("ok 8")
+
+                sig_pqopk = base64.b64decode(client.recv(1024))
+
+                print("ok 9")
+
+                print("ok in recv key")
+
+                # Insert new keys into the database
+                # ? sambung esok....
+                cursor.execute('''INSERT INTO keys (
+                                    user_id,
+                                    id_key_public,
+                                    id_key_private,
+                                    
+                                    pqid_pkey,
+                                    pqid_skey,
+
+                                    spk_key_public,
+                                    spk_key_private,
+
+                                    sig_spk,
+
+                                    pqspk_pkey,
+                                    pqspk_skey,
+
+                                    sig_pqspk,
+
+                                    opk_key_public,
+                                    opk_key_private,
+
+                                    pqopk_pkey,
+                                    pqopk_skey,
+                                    sig_pqopk) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''', (
+                                    user_id,
+                                    id_key_public,
+                                    id_key_private,
+                                    
+                                    pqid_pkey,
+                                    pqid_skey,
+
+                                    spk_key_public,
+                                    spk_key_private,
+
+                                    sig_spk,
+
+                                    pqspk_pkey,
+                                    pqspk_skey,
+
+                                    sig_pqspk,
+
+                                    opk_key_public,
+                                    opk_key_private,
+
+                                    pqopk_pkey,
+                                    pqopk_skey,
+                                    sig_pqopk))
                 conn.commit()
 
                 client.send("REGISTER_SUCCESS".encode('utf-8'))

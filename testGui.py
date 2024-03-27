@@ -94,12 +94,14 @@ client = Client(HOST, PORT)
 # // TODO : add GUI for username & password 
 # TODO : hide password entries
 # // TODO : start init. encrypt on login on conn
-# TODO : start init. encrypt on register on conn
+# // TODO : start init. encrypt on register on conn
 # // TODO : polish retry login after fail - some uncaught exception / logic err
 # // TODO : clean up encryption method in separate funct
+# TODO : start init. pqxdh key gen
 # ! TODO : polish clean exit - threading err
 
 ### These libs are used for basic funct - network and threading
+import base64
 import socket
 import threading
 
@@ -112,9 +114,14 @@ from tkinter import messagebox
 ### These libs are used for conv. symm / asymm op.
 from Crypto.PublicKey import ECC
 from Crypto.Protocol.DH import key_agreement
-from Crypto.Hash import SHAKE128
+from Crypto.Hash import SHAKE128, SHA512
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad
+from Crypto.Signature import eddsa
+
+### These libs are used for Post-Quantum op.
+from kyber import Kyber1024
+from pqc.sign import dilithium5
 
 HOST = '127.0.0.1'
 PORT = 9090
@@ -168,6 +175,77 @@ class Client:
         self.sock.send(data)
         self.sock.send(cipher.iv)
 
+    def init_pqxdh(self, state):
+
+        # if register first time, publish all keys to server
+        # ! may not be best way to do but encrypt all privkeys 
+        # ! with pwd on server
+        if state == "register":
+
+            # Generate keys for init PQXDH
+            id_key_public = self.user_key_public.export_key(format='PEM')
+            id_key_private = self.user_key_private.export_key(
+                                format='PEM',
+                                protection='PBKDF2WithHMAC-SHA512AndAES256-CBC',
+                                prot_params={'iteration_count':131072})
+
+            pqid_pkey, pqid_skey = dilithium5.keypair()
+
+            spk_key = ECC.generate(curve='ed25519')
+            spk_key_public = spk_key.public_key().export_key(format='PEM')
+            spk_key_private = spk_key.export_key(
+                                format='PEM',
+                                protection='PBKDF2WithHMAC-SHA512AndAES256-CBC',
+                                prot_params={'iteration_count':131072})
+
+            signer = eddsa.new(self.user_key_private, 'rfc8032')
+            sig_spk = signer.sign(SHA512.new(spk_key.public_key().export_key(format='DER')))
+
+            pqspk_pkey, pqspk_skey = Kyber1024.keygen()
+
+            sig_pqspk = signer.sign(SHA512.new(pqspk_pkey))
+
+            opk_key = ECC.generate(curve='ed25519')
+            opk_key_public = opk_key.public_key().export_key(format='PEM')
+            opk_key_private = opk_key.export_key(
+                                format='PEM',
+                                protection='PBKDF2WithHMAC-SHA512AndAES256-CBC',
+                                prot_params={'iteration_count':131072})
+
+            pqopk_pkey, pqopk_skey = Kyber1024.keygen()
+
+            sig_pqopk = signer.sign(SHA512.new(pqopk_pkey))
+
+            # Publish keys to server
+            # ! may need to work out better way to send keys...
+            self.sock.send(id_key_public.encode('utf-8'))
+            self.sock.send(id_key_private.encode('utf-8'))
+            print("ok 1")
+            self.sock.send(base64.b64encode(pqid_pkey))
+            self.sock.send(base64.b64encode(pqid_skey))
+            print("ok 2")
+            self.sock.send(spk_key_public.encode('utf-8'))
+            self.sock.send(spk_key_private.encode('utf-8'))
+            print("ok 3")
+            self.sock.send(base64.b64encode(sig_spk))
+            print("ok 4")
+            self.sock.send(base64.b64encode(pqspk_pkey))
+            self.sock.send(base64.b64encode(pqspk_skey))
+            print("ok 5")
+            self.sock.send(base64.b64encode(sig_pqspk))
+            print("ok 6")
+            self.sock.send(opk_key_public.encode('utf-8'))
+            self.sock.send(opk_key_private.encode('utf-8'))
+            print("ok 7")
+            self.sock.send(base64.b64encode(pqopk_pkey))
+            self.sock.send(base64.b64encode(pqopk_skey))
+            print("ok 8")
+            self.sock.send(base64.b64encode(sig_pqopk))
+            print("ok 9")
+
+            print("ok in send key")
+
+
     # * This function is to ask users whether to login or register
     def login_or_register_gui(self):
         self.login_or_register_win = tk.Tk()
@@ -180,6 +258,10 @@ class Client:
         screenheight = self.login_or_register_win.winfo_screenheight()
         alignstr = '%dx%d+%d+%d' % (width, height, (screenwidth - width) / 2, (screenheight - height) / 2)
         self.login_or_register_win.geometry(alignstr)
+
+        self.logo_label = tk.Label(self.login_or_register_win, text="BASED", background="white")
+        self.logo_label.config(font=("Arial", 56))
+        self.logo_label.pack(padx=100, pady=50)
 
         self.login_button = tk.Button(self.login_or_register_win, text="Login", command=self.login_gui)
         self.login_button.config(font=("Arial", 12))
@@ -348,6 +430,8 @@ class Client:
             # ? encrypted data will be sent on encrypt()
             session_key = self.init_ecdh()
             self.init_encrypt(session_key, register_data)
+
+            self.init_pqxdh(state="register")
 
             # Wait for server response
             register_response = self.sock.recv(1024).decode('utf-8')
