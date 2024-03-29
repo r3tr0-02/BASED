@@ -98,10 +98,13 @@ client = Client(HOST, PORT)
 # // TODO : polish retry login after fail - some uncaught exception / logic err
 # // TODO : clean up encryption method in separate funct
 # TODO : start init. pqxdh key gen
+# TODO : how to encrypt and handle priv keys in db? 
 # ! TODO : polish clean exit - threading err
 
 ### These libs are used for basic funct - network and threading
-import base64
+from base64 import b64encode
+import json
+import time
 import socket
 import threading
 
@@ -175,75 +178,132 @@ class Client:
         self.sock.send(data)
         self.sock.send(cipher.iv)
 
-    def init_pqxdh(self, state):
+    # * This function is to perform initial ECDH KEP on client-server
+    # ? This function will return a shared session key
+    def init_pqxdh(self, state, pwd):
 
         # if register first time, publish all keys to server
         # ! may not be best way to do but encrypt all privkeys 
         # ! with pwd on server
-        if state == "register":
+        if state == "login":
+            pass
+        elif state == "register":
+
+            cipher = AES.new(self.kdf(pwd.encode('utf-8')), AES.MODE_CBC)
+            signer = eddsa.new(self.user_key_private, 'rfc8032')
 
             # Generate keys for init PQXDH
             id_key_public = self.user_key_public.export_key(format='PEM')
             id_key_private = self.user_key_private.export_key(
                                 format='PEM',
+                                pwd=pwd,
                                 protection='PBKDF2WithHMAC-SHA512AndAES256-CBC',
                                 prot_params={'iteration_count':131072})
 
             pqid_pkey, pqid_skey = dilithium5.keypair()
 
+            pqid_pkey = b64encode(pqid_pkey).decode('utf-8')
+            pqid_skey = cipher.encrypt(pad(pqid_skey, AES.block_size))
+            pqid_skey = json.dumps(
+                {
+                    'iv': b64encode(cipher.iv).decode('utf-8'),
+                    'pqid_skey': b64encode(pqid_skey).decode('utf-8')
+                }
+            )
+
+            print("len pqidskey: ", len(pqid_skey))
+            print(pqid_skey)
+
             spk_key = ECC.generate(curve='ed25519')
             spk_key_public = spk_key.public_key().export_key(format='PEM')
             spk_key_private = spk_key.export_key(
                                 format='PEM',
+                                pwd=pwd,
                                 protection='PBKDF2WithHMAC-SHA512AndAES256-CBC',
                                 prot_params={'iteration_count':131072})
 
-            signer = eddsa.new(self.user_key_private, 'rfc8032')
             sig_spk = signer.sign(SHA512.new(spk_key.public_key().export_key(format='DER')))
+            sig_spk = b64encode(sig_spk).decode('utf-8')
 
             pqspk_pkey, pqspk_skey = Kyber1024.keygen()
 
             sig_pqspk = signer.sign(SHA512.new(pqspk_pkey))
+            sig_pqspk = b64encode(sig_pqspk).decode('utf-8')
+
+            pqspk_skey = cipher.encrypt(pad(pqspk_skey, AES.block_size))
+            pqspk_pkey = b64encode(pqspk_pkey).decode('utf-8')
+            pqspk_skey = json.dumps(
+                {
+                    'iv': b64encode(cipher.iv).decode('utf-8'),
+                    'pqspk_skey': b64encode(pqspk_skey).decode('utf-8')
+                }
+            )
+
+            print("len pqspk_skey: ", len(pqspk_skey))
 
             opk_key = ECC.generate(curve='ed25519')
             opk_key_public = opk_key.public_key().export_key(format='PEM')
             opk_key_private = opk_key.export_key(
                                 format='PEM',
+                                pwd=pwd,
                                 protection='PBKDF2WithHMAC-SHA512AndAES256-CBC',
                                 prot_params={'iteration_count':131072})
 
             pqopk_pkey, pqopk_skey = Kyber1024.keygen()
 
             sig_pqopk = signer.sign(SHA512.new(pqopk_pkey))
+            sig_pqopk = b64encode(sig_pqopk).decode('utf-8')
+
+            pqopk_skey = cipher.encrypt(pad(pqopk_skey, AES.block_size))
+            pqopk_pkey = b64encode(pqopk_pkey).decode('utf-8')
+            pqopk_skey = json.dumps(
+                {
+                    'iv': b64encode(cipher.iv).decode('utf-8'),
+                    'pqopk_skey': b64encode(pqopk_skey).decode('utf-8')
+                }
+            )
+
+            print("len pqopk_skey: ", len(pqopk_skey))
 
             # Publish keys to server
             # ! may need to work out better way to send keys...
             self.sock.send(id_key_public.encode('utf-8'))
             self.sock.send(id_key_private.encode('utf-8'))
-            print("ok 1")
-            self.sock.send(base64.b64encode(pqid_pkey))
-            self.sock.send(base64.b64encode(pqid_skey))
-            print("ok 2")
+            #print("ok 1")
+            time.sleep(0.05)
+            self.sock.send(pqid_pkey.encode('utf-8'))
+            self.sock.send(pqid_skey.encode('utf-8'))
+            #print("ok 2")
+            time.sleep(0.05)
             self.sock.send(spk_key_public.encode('utf-8'))
             self.sock.send(spk_key_private.encode('utf-8'))
-            print("ok 3")
-            self.sock.send(base64.b64encode(sig_spk))
-            print("ok 4")
-            self.sock.send(base64.b64encode(pqspk_pkey))
-            self.sock.send(base64.b64encode(pqspk_skey))
-            print("ok 5")
-            self.sock.send(base64.b64encode(sig_pqspk))
-            print("ok 6")
+            #print("ok 3")
+            time.sleep(0.05)
+            self.sock.send(str(sig_spk).encode('utf-8'))
+            #print("ok 4")
+            time.sleep(0.05)
+            self.sock.send(pqspk_pkey.encode('utf-8'))
+            self.sock.send(pqspk_skey.encode('utf-8'))
+            #print("ok 5")
+            time.sleep(0.05)
+            self.sock.send(str(sig_pqspk).encode('utf-8'))
+            #print("ok 6")
+            time.sleep(0.05)
             self.sock.send(opk_key_public.encode('utf-8'))
             self.sock.send(opk_key_private.encode('utf-8'))
-            print("ok 7")
-            self.sock.send(base64.b64encode(pqopk_pkey))
-            self.sock.send(base64.b64encode(pqopk_skey))
-            print("ok 8")
-            self.sock.send(base64.b64encode(sig_pqopk))
-            print("ok 9")
+            #print("ok 7")
+            time.sleep(0.05)
+            self.sock.send(pqopk_pkey.encode('utf-8'))
+            self.sock.send(pqopk_skey.encode('utf-8'))
+            #print("ok 8")
+            time.sleep(0.05)
+            self.sock.send(str(sig_pqopk).encode('utf-8'))
+            #print("ok 9")
+            time.sleep(0.05)
+            #print("ok in send keys")
 
-            print("ok in send key")
+    def calc_pqxdh():
+        pass
 
 
     # * This function is to ask users whether to login or register
@@ -388,6 +448,8 @@ class Client:
         if login_response == "LOGIN_SUCCESS":
             self.login_win.destroy()
 
+
+
             self.nickname = self.username
             self.gui_done = False
             self.running = True
@@ -431,7 +493,7 @@ class Client:
             session_key = self.init_ecdh()
             self.init_encrypt(session_key, register_data)
 
-            self.init_pqxdh(state="register")
+            self.init_pqxdh(state="register", pwd=self.password)
 
             # Wait for server response
             register_response = self.sock.recv(1024).decode('utf-8')
@@ -498,6 +560,8 @@ class Client:
     # * broadcasted to other users
     def write(self):
         message = f"{self.nickname}: {self.input_area.get('1.0', 'end')}"
+
+        # ! encrypt here
         self.sock.send(message.encode('utf-8'))
         self.input_area.delete('1.0', 'end')
 
@@ -534,6 +598,7 @@ class Client:
     def receive(self):
         while self.running:
             try:
+                # ! decrypt here
                 message = self.sock.recv(1024).decode('utf-8')
                 if message == 'NICK':
                     self.sock.send(self.nickname.encode('utf-8'))

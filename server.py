@@ -193,12 +193,13 @@ def server_keygen():
         f.close()
 
 # * This function is to generate a Kyber-1024 keypair for server
+# ! This function is not used anymore as of test v1.3 Alpha
 # ? server keypairs are stored in memory
 # ? server keypairs are re-generated each runtime 
-def server_PQ_keygen():
-    server_pq_key_public, server_pq_key_private = Kyber1024.keygen()
+# def server_PQ_keygen():
+#     server_pq_key_public, server_pq_key_private = Kyber1024.keygen()
 
-    return server_pq_key_public, server_pq_key_private
+#     return server_pq_key_public, server_pq_key_private
 
 # * This function is to get server private key from .pem file
 def read_server_private_key():
@@ -378,53 +379,53 @@ def receive():
 
                 cursor.execute('SELECT id from users WHERE username = ?;', (username,))
                 user_id = cursor.fetchone()
+                user_id = user_id[0]
 
                 id_key_public = client.recv(1024).decode('utf-8')
                 id_key_private = client.recv(1024).decode('utf-8')
 
-                print("ok 1")
+                #print("ok 1")
                 
-                pqid_pkey = base64.b64decode(client.recv(1024))
-                pqid_skey = base64.b64decode(client.recv(1024))
+                pqid_pkey = client.recv(30720).decode('utf-8')
+                pqid_skey = client.recv(30720).decode('utf-8')
 
-                print("ok 2")
+                #print("ok 2")
 
                 spk_key_public = client.recv(1024).decode('utf-8')
                 spk_key_private = client.recv(1024).decode('utf-8')
 
-                print("ok 3")
+                #print("ok 3")
 
-                sig_spk = base64.b64decode(client.recv(1024))
+                sig_spk = client.recv(20480).decode('utf-8')
 
-                print("ok 4")
+                #print("ok 4")
 
-                pqspk_pkey = base64.b64decode(client.recv(1024))
-                pqspk_skey = base64.b64decode(client.recv(1024))
+                pqspk_pkey = client.recv(30720).decode('utf-8')
+                pqspk_skey = client.recv(30720).decode('utf-8')
 
-                print("ok 5")
+                #print("ok 5")
 
-                sig_pqspk = base64.b64decode(client.recv(1024))
+                sig_pqspk = client.recv(20480).decode('utf-8')
 
-                print("ok 6")
+                #print("ok 6")
 
                 opk_key_public = client.recv(1024).decode('utf-8')
                 opk_key_private = client.recv(1024).decode('utf-8')
 
-                print("ok 7")
+                #print("ok 7")
 
-                pqopk_pkey = base64.b64decode(client.recv(2048))
-                pqopk_skey = base64.b64decode(client.recv(2048))
+                pqopk_pkey = client.recv(30720).decode('utf-8')
+                pqopk_skey = client.recv(30720).decode('utf-8')
 
-                print("ok 8")
+                #print("ok 8")
 
-                sig_pqopk = base64.b64decode(client.recv(1024))
+                sig_pqopk = client.recv(20480).decode('utf-8')
 
-                print("ok 9")
-
-                print("ok in recv key")
+                #print("ok 9")
+                #print("ok in recv keys")
 
                 # Insert new keys into the database
-                # ? sambung esok....
+                # ? may need a better way of key mgmt...
                 cursor.execute('''INSERT INTO keys (
                                     user_id,
                                     id_key_public,
@@ -448,7 +449,7 @@ def receive():
 
                                     pqopk_pkey,
                                     pqopk_skey,
-                                    sig_pqopk) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''', (
+                                    sig_pqopk) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);''', (
                                     user_id,
                                     id_key_public,
                                     id_key_private,
@@ -471,15 +472,15 @@ def receive():
 
                                     pqopk_pkey,
                                     pqopk_skey,
-                                    sig_pqopk))
+                                    sig_pqopk,))
                 conn.commit()
 
                 client.send("REGISTER_SUCCESS".encode('utf-8'))
+                
         else:
             client.send("INVALID_OPTION".encode('utf-8'))
 
 banner()
 server_keygen()
-server_PQ_keygen()
 print("\nServer is running!")
 receive()
