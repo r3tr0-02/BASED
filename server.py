@@ -65,6 +65,7 @@ receive()
 
 ### These libs are used for basic funct - network and threading
 import base64
+import time
 import socket
 import threading
 
@@ -255,6 +256,32 @@ def init_decrypt(client, session_key):
 
     return login_data
 
+def retrieve_keys(client, user_id):
+    cursor.execute('SELECT * FROM keys WHERE user_id = ?;', (user_id,))
+    keys = cursor.fetchone()
+
+    client.send(keys[1].encode('utf-8'))
+    time.sleep(0.05)
+    client.send(keys[2].encode('utf-8'))
+    time.sleep(0.05)
+    client.send(keys[3].encode('utf-8'))
+    time.sleep(0.05)
+    client.send(keys[4].encode('utf-8'))
+    time.sleep(0.05)
+    client.send(keys[5].encode('utf-8'))
+    time.sleep(0.05)
+    client.send(keys[6].encode('utf-8'))
+    time.sleep(0.05)
+    client.send(keys[8].encode('utf-8'))
+    time.sleep(0.05)
+    client.send(keys[9].encode('utf-8'))
+    time.sleep(0.05)
+    client.send(keys[11].encode('utf-8'))
+    client.send(keys[12].encode('utf-8'))
+    time.sleep(0.05)
+    client.send(keys[13].encode('utf-8'))
+    client.send(keys[14].encode('utf-8'))
+
 # * This function is to generate a random 16-byte salt for pass hash
 def generate_salt():
     return secrets.token_hex(16)
@@ -321,7 +348,7 @@ def receive():
                 pass
             else:
                 # Retrieve salt for the user
-                cursor.execute('SELECT salt FROM users WHERE username = ?', (username,))
+                cursor.execute('SELECT salt FROM users WHERE username = ?;', (username,))
                 salt_data = cursor.fetchone()
 
                 if salt_data:
@@ -329,11 +356,13 @@ def receive():
                     hashed_password = hash_password(password, salt)
 
                     # Verify login credentials
-                    cursor.execute('SELECT username, password FROM users WHERE username = ? AND password = ?;', (username, hashed_password))
+                    cursor.execute('SELECT id, username, password FROM users WHERE username = ? AND password = ?;', (username, hashed_password))
                     user_data = cursor.fetchone()
 
                     if user_data:
                         client.send("LOGIN_SUCCESS".encode('utf-8'))
+                        
+                        retrieve_keys(client, user_data[0])
 
                         # Set the username as the nickname
                         nicknames.append(username)

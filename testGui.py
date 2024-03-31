@@ -98,11 +98,12 @@ client = Client(HOST, PORT)
 # // TODO : polish retry login after fail - some uncaught exception / logic err
 # // TODO : clean up encryption method in separate funct
 # TODO : start init. pqxdh key gen
+# TODO : polish login-retrieve key (encrypt curve skeys)
 # TODO : how to encrypt and handle priv keys in db? 
 # ! TODO : polish clean exit - threading err
 
 ### These libs are used for basic funct - network and threading
-from base64 import b64encode
+from base64 import b64encode, b64decode
 import json
 import time
 import socket
@@ -119,7 +120,7 @@ from Crypto.PublicKey import ECC
 from Crypto.Protocol.DH import key_agreement
 from Crypto.Hash import SHAKE128, SHA512
 from Crypto.Cipher import AES
-from Crypto.Util.Padding import pad
+from Crypto.Util.Padding import unpad, pad
 from Crypto.Signature import eddsa
 
 ### These libs are used for Post-Quantum op.
@@ -182,27 +183,76 @@ class Client:
     # ? This function will return a shared session key
     def init_pqxdh(self, state, pwd):
 
+        # if login, retrieve all keys belong to user
+        if state == "login":
+            id_key_public = ECC.import_key(self.sock.recv(1024).decode('utf-8'))
+            json_key = self.sock.recv(1024).decode('utf-8')
+            json_key = json.loads(json_key)
+            cipher = AES.new(self.kdf(pwd.encode('utf-8')), AES.MODE_CBC, b64decode(json_key['iv']))
+            id_key_private = unpad(cipher.decrypt(b64decode(json_key['id_key_private'])), AES.block_size)
+            id_key_private = ECC.import_key(id_key_private.decode('utf-8'))
+
+            pqid_pkey = self.sock.recv(30720).decode('utf-8')
+            pqid_pkey = b64decode(pqid_pkey)
+
+            json_key = self.sock.recv(30720).decode('utf-8')
+            json_key = json.loads(json_key)
+            cipher = AES.new(self.kdf(pwd.encode('utf-8')), AES.MODE_CBC, b64decode(json_key['iv']))
+            pqid_skey = unpad(cipher.decrypt(b64decode(json_key['pqid_skey'])), AES.block_size)
+
+            spk_key_public = ECC.import_key(self.sock.recv(1024).decode('utf-8'))
+            json_key = self.sock.recv(1024).decode('utf-8')
+            json_key = json.loads(json_key)
+            cipher = AES.new(self.kdf(pwd.encode('utf-8')), AES.MODE_CBC, b64decode(json_key['iv']))
+            spk_key_private = unpad(cipher.decrypt(b64decode(json_key['spk_key_private'])), AES.block_size)
+            spk_key_private = ECC.import_key(spk_key_private.decode('utf-8'))
+
+            pqspk_pkey = self.sock.recv(30720).decode('utf-8')
+            pqspk_pkey = b64decode(pqspk_pkey)
+
+            json_key = self.sock.recv(30720).decode('utf-8')
+            json_key = json.loads(json_key)
+            cipher = AES.new(self.kdf(pwd.encode('utf-8')), AES.MODE_CBC, b64decode(json_key['iv']))
+            pqspk_skey = unpad(cipher.decrypt(b64decode(json_key['pqspk_skey'])), AES.block_size)
+
+            opk_key_public = ECC.import_key(self.sock.recv(1024).decode('utf-8'))
+            json_key = self.sock.recv(1024).decode('utf-8')
+            json_key = json.loads(json_key)
+            cipher = AES.new(self.kdf(pwd.encode('utf-8')), AES.MODE_CBC, b64decode(json_key['iv']))
+            opk_key_private = unpad(cipher.decrypt(b64decode(json_key['opk_key_private'])), AES.block_size)
+            opk_key_private = ECC.import_key(opk_key_private.decode('utf-8'))
+
+            pqopk_pkey = self.sock.recv(30720).decode('utf-8')
+            pqopk_pkey = b64decode(pqopk_pkey) 
+
+            json_key = self.sock.recv(30720).decode('utf-8')
+            json_key = json.loads(json_key)
+            cipher = AES.new(self.kdf(pwd.encode('utf-8')), AES.MODE_CBC, b64decode(json_key['iv']))
+            pqopk_skey = unpad(cipher.decrypt(b64decode(json_key['pqopk_skey'])), AES.block_size)
+
+            print("ok in recv key")
         # if register first time, publish all keys to server
         # ! may not be best way to do but encrypt all privkeys 
         # ! with pwd on server
-        if state == "login":
-            pass
         elif state == "register":
-
-            cipher = AES.new(self.kdf(pwd.encode('utf-8')), AES.MODE_CBC)
             signer = eddsa.new(self.user_key_private, 'rfc8032')
 
             # Generate keys for init PQXDH
             id_key_public = self.user_key_public.export_key(format='PEM')
-            id_key_private = self.user_key_private.export_key(
-                                format='PEM',
-                                pwd=pwd,
-                                protection='PBKDF2WithHMAC-SHA512AndAES256-CBC',
-                                prot_params={'iteration_count':131072})
+            id_key_private = self.user_key_private.export_key(format='PEM')
+            cipher = AES.new(self.kdf(pwd.encode('utf-8')), AES.MODE_CBC)
+            id_key_private = cipher.encrypt(pad(id_key_private.encode('utf-8'), AES.block_size))
+            id_key_private = json.dumps(
+                {
+                    'iv': b64encode(cipher.iv).decode('utf-8'),
+                    'id_key_private': b64encode(id_key_private).decode('utf-8')
+                }
+            )
 
             pqid_pkey, pqid_skey = dilithium5.keypair()
 
             pqid_pkey = b64encode(pqid_pkey).decode('utf-8')
+            cipher = AES.new(self.kdf(pwd.encode('utf-8')), AES.MODE_CBC)
             pqid_skey = cipher.encrypt(pad(pqid_skey, AES.block_size))
             pqid_skey = json.dumps(
                 {
@@ -211,16 +261,17 @@ class Client:
                 }
             )
 
-            print("len pqidskey: ", len(pqid_skey))
-            print(pqid_skey)
-
             spk_key = ECC.generate(curve='ed25519')
             spk_key_public = spk_key.public_key().export_key(format='PEM')
-            spk_key_private = spk_key.export_key(
-                                format='PEM',
-                                pwd=pwd,
-                                protection='PBKDF2WithHMAC-SHA512AndAES256-CBC',
-                                prot_params={'iteration_count':131072})
+            spk_key_private = spk_key.export_key(format='PEM')
+            cipher = AES.new(self.kdf(pwd.encode('utf-8')), AES.MODE_CBC)
+            spk_key_private = cipher.encrypt(pad(spk_key_private.encode('utf-8'), AES.block_size))
+            spk_key_private = json.dumps(
+                {
+                    'iv': b64encode(cipher.iv).decode('utf-8'),
+                    'spk_key_private': b64encode(spk_key_private).decode('utf-8')
+                }
+            )
 
             sig_spk = signer.sign(SHA512.new(spk_key.public_key().export_key(format='DER')))
             sig_spk = b64encode(sig_spk).decode('utf-8')
@@ -230,6 +281,7 @@ class Client:
             sig_pqspk = signer.sign(SHA512.new(pqspk_pkey))
             sig_pqspk = b64encode(sig_pqspk).decode('utf-8')
 
+            cipher = AES.new(self.kdf(pwd.encode('utf-8')), AES.MODE_CBC)
             pqspk_skey = cipher.encrypt(pad(pqspk_skey, AES.block_size))
             pqspk_pkey = b64encode(pqspk_pkey).decode('utf-8')
             pqspk_skey = json.dumps(
@@ -239,21 +291,24 @@ class Client:
                 }
             )
 
-            print("len pqspk_skey: ", len(pqspk_skey))
-
             opk_key = ECC.generate(curve='ed25519')
             opk_key_public = opk_key.public_key().export_key(format='PEM')
-            opk_key_private = opk_key.export_key(
-                                format='PEM',
-                                pwd=pwd,
-                                protection='PBKDF2WithHMAC-SHA512AndAES256-CBC',
-                                prot_params={'iteration_count':131072})
+            opk_key_private = opk_key.export_key(format='PEM')
+            cipher = AES.new(self.kdf(pwd.encode('utf-8')), AES.MODE_CBC)
+            opk_key_private = cipher.encrypt(pad(opk_key_private.encode('utf-8'), AES.block_size))
+            opk_key_private = json.dumps(
+                {
+                    'iv': b64encode(cipher.iv).decode('utf-8'),
+                    'opk_key_private': b64encode(opk_key_private).decode('utf-8')
+                }
+            )
 
             pqopk_pkey, pqopk_skey = Kyber1024.keygen()
 
             sig_pqopk = signer.sign(SHA512.new(pqopk_pkey))
             sig_pqopk = b64encode(sig_pqopk).decode('utf-8')
 
+            cipher = AES.new(self.kdf(pwd.encode('utf-8')), AES.MODE_CBC)
             pqopk_skey = cipher.encrypt(pad(pqopk_skey, AES.block_size))
             pqopk_pkey = b64encode(pqopk_pkey).decode('utf-8')
             pqopk_skey = json.dumps(
@@ -262,8 +317,6 @@ class Client:
                     'pqopk_skey': b64encode(pqopk_skey).decode('utf-8')
                 }
             )
-
-            print("len pqopk_skey: ", len(pqopk_skey))
 
             # Publish keys to server
             # ! may need to work out better way to send keys...
@@ -448,7 +501,7 @@ class Client:
         if login_response == "LOGIN_SUCCESS":
             self.login_win.destroy()
 
-
+            self.init_pqxdh("login", self.password)
 
             self.nickname = self.username
             self.gui_done = False
