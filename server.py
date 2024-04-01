@@ -406,42 +406,48 @@ def receive():
             except ValueError:  # ? for except handle ecdh
                 pass
             else:
-                # Retrieve salt for the user
-                cursor.execute('SELECT salt FROM users WHERE username = ?;', (username,))
-                salt_data = cursor.fetchone()
+                # ! prevent same acc login twice
+                if username in nicknames:
+                    client.send("LOGIN_DUPE".encode('utf-8'))
+                
+                # else account has not log in yet, proceed login
+                else:
+                    # Retrieve salt for the user
+                    cursor.execute('SELECT salt FROM users WHERE username = ?;', (username,))
+                    salt_data = cursor.fetchone()
 
-                if salt_data:
-                    salt = salt_data[0]
-                    hashed_password = hash_password(password, salt)
+                    if salt_data:
+                        salt = salt_data[0]
+                        hashed_password = hash_password(password, salt)
 
-                    # Verify login credentials
-                    cursor.execute('SELECT id, username, password FROM users WHERE username = ? AND password = ?;', (username, hashed_password))
-                    user_data = cursor.fetchone()
+                        # Verify login credentials
+                        cursor.execute('SELECT id, username, password FROM users WHERE username = ? AND password = ?;', (username, hashed_password))
+                        user_data = cursor.fetchone()
 
-                    if user_data:
-                        client.send("LOGIN_SUCCESS".encode('utf-8'))
+                        if user_data:
+                            client.send("LOGIN_SUCCESS".encode('utf-8'))
 
-                        # ? Send all user keys from db to client
-                        retrieve_keys(client, user_data[0])
+                            # ? Send all user keys from db to client
+                            retrieve_keys(client, user_data[0])
 
-                        # Set the username as the nickname
-                        nicknames.append(username)
+                            # Set the username as the nickname
+                            nicknames.append(username)
 
-                        clients.append(client)
+                            clients.append(client)
 
-                        print(nicknames)
+                            print(nicknames)
 
-                        print(f"Nickname of the client is {username}")
-                        broadcast(f"{username} connected to the server!\n".encode('utf-8'))
-                        client.send("Connected to the server".encode('utf-8'))
+                            print(f"Nickname of the client is {username}")
+                            broadcast(f"{username} connected to the server!\n".encode('utf-8'))
+                            client.send("Connected to the server".encode('utf-8'))
 
-                        thread = threading.Thread(target=handle, args=(client,))
-                        thread.start()
+                            thread = threading.Thread(target=handle, args=(client,))
+                            thread.start()
+                        else:
+                            client.send("LOGIN_FAILED".encode('utf-8'))
+
                     else:
                         client.send("LOGIN_FAILED".encode('utf-8'))
-
-                else:
-                    client.send("LOGIN_FAILED".encode('utf-8'))
 
         # register option
         elif login_or_register.lower() == 'register':

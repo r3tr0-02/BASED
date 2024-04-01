@@ -496,6 +496,7 @@ class Client:
         # Wait for server response
         login_response = self.sock.recv(1024).decode('utf-8')
 
+        # if login success, goto message_gui
         if login_response == "LOGIN_SUCCESS":
             self.login_win.destroy()
 
@@ -513,6 +514,20 @@ class Client:
 
             gui_thread.join()
             receive_thread.join()
+
+        # if login dupe, abort login
+        elif login_response == "LOGIN_DUPE":
+            messagebox.showerror(title="Error", message="Your account has been logged in by another client!")
+
+            # ! for some reason, retry after login will result in conn drop
+            # ? temp solution is to close the current conn and re-init the conn
+            self.sock.close()
+
+            self.login_win.destroy()
+
+            self.__init__(HOST, PORT)
+
+        # if login fail, go back to login_or_register
         else:
             messagebox.showerror(title="Error", message="Your username and/or password is incorrect!")
 
