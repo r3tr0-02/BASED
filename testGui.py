@@ -98,8 +98,12 @@ client = Client(HOST, PORT)
 # // TODO : polish retry login after fail - some uncaught exception / logic err
 # // TODO : clean up encryption method in separate funct
 # TODO : start init. pqxdh key gen
-# TODO : polish login-retrieve key (encrypt curve skeys)
-# TODO : how to encrypt and handle priv keys in db? 
+# TODO : start calc pqxdh sk - get current clients in session, then update SK each time?
+# TODO : research on how to do clients > 2 ?
+# TODO : research on what happen if client exit?
+# // TODO : except handling on exit (init ecdh-encrypt)
+# // TODO : polish login-retrieve key (encrypt curve skeys)
+# // TODO : how to encrypt and handle priv keys in db? 
 # ! TODO : polish clean exit - threading err
 
 ### These libs are used for basic funct - network and threading
@@ -151,6 +155,7 @@ class Client:
         self.user_key_public = user_key.public_key()
         self.user_key_private = user_key
 
+    # * This function is for Key Derivation Function for ECDH op.
     def kdf(self, x):
         return SHAKE128.new(x).read(32)
 
@@ -179,11 +184,14 @@ class Client:
         self.sock.send(data)
         self.sock.send(cipher.iv)
 
-    # * This function is to perform initial ECDH KEP on client-server
-    # ? This function will return a shared session key
+    # * This function is to perform initial PQXDH key generation and 
+    # * management on client-server
+    # ? If login, retrieve user keys from server and set session with keys
+    # ? If register, generate and upload keys and sigs to server
     def init_pqxdh(self, state, pwd):
 
         # if login, retrieve all keys belong to user
+        # ? decrypt all privkeys with kdf(pwd)
         if state == "login":
             id_key_public = ECC.import_key(self.sock.recv(1024).decode('utf-8'))
             json_key = self.sock.recv(1024).decode('utf-8')
@@ -230,10 +238,9 @@ class Client:
             cipher = AES.new(self.kdf(pwd.encode('utf-8')), AES.MODE_CBC, b64decode(json_key['iv']))
             pqopk_skey = unpad(cipher.decrypt(b64decode(json_key['pqopk_skey'])), AES.block_size)
 
-            print("ok in recv key")
         # if register first time, publish all keys to server
         # ! may not be best way to do but encrypt all privkeys 
-        # ! with pwd on server
+        # ! with kdf(pwd) and AES
         elif state == "register":
             signer = eddsa.new(self.user_key_private, 'rfc8032')
 
@@ -322,41 +329,32 @@ class Client:
             # ! may need to work out better way to send keys...
             self.sock.send(id_key_public.encode('utf-8'))
             self.sock.send(id_key_private.encode('utf-8'))
-            #print("ok 1")
             time.sleep(0.05)
             self.sock.send(pqid_pkey.encode('utf-8'))
             self.sock.send(pqid_skey.encode('utf-8'))
-            #print("ok 2")
             time.sleep(0.05)
             self.sock.send(spk_key_public.encode('utf-8'))
             self.sock.send(spk_key_private.encode('utf-8'))
-            #print("ok 3")
             time.sleep(0.05)
             self.sock.send(str(sig_spk).encode('utf-8'))
-            #print("ok 4")
             time.sleep(0.05)
             self.sock.send(pqspk_pkey.encode('utf-8'))
             self.sock.send(pqspk_skey.encode('utf-8'))
-            #print("ok 5")
             time.sleep(0.05)
             self.sock.send(str(sig_pqspk).encode('utf-8'))
-            #print("ok 6")
             time.sleep(0.05)
             self.sock.send(opk_key_public.encode('utf-8'))
             self.sock.send(opk_key_private.encode('utf-8'))
-            #print("ok 7")
             time.sleep(0.05)
             self.sock.send(pqopk_pkey.encode('utf-8'))
             self.sock.send(pqopk_skey.encode('utf-8'))
-            #print("ok 8")
             time.sleep(0.05)
             self.sock.send(str(sig_pqopk).encode('utf-8'))
-            #print("ok 9")
             time.sleep(0.05)
-            #print("ok in send keys")
 
     def calc_pqxdh():
         pass
+
 
 
     # * This function is to ask users whether to login or register
@@ -546,11 +544,10 @@ class Client:
             session_key = self.init_ecdh()
             self.init_encrypt(session_key, register_data)
 
-            self.init_pqxdh(state="register", pwd=self.password)
-
             # Wait for server response
             register_response = self.sock.recv(1024).decode('utf-8')
             if register_response == "REGISTER_SUCCESS":
+                self.init_pqxdh(state="register", pwd=self.password)
                 messagebox.showinfo(title="Info", message="Registration complete. Please log in using your username and password.")
                 
                 # ! same handle case as login, close and re-init conn after exit win

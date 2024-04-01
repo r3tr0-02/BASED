@@ -59,8 +59,11 @@ receive()
 # `TODO : switch hashlib to argon2 properly
 # // TODO : start initial encryption between server-client in handling login/register inputs
 # // TODO : start initial encryption between server-client in handling register
-# TODO : storing user keys into db on register
-# TODO : retrieve user keys from db on login 
+# // TODO : storing user keys into db on register
+# // TODO : retrieve user keys from db on login 
+# // TODO : maybe except handling on register dupe users?
+# // TODO : except handling on exit (init ecdh-decrypt)
+# TODO : start calc pqxdh sk - send all keys for client in clients in session?, then update?
 # // TODO : clean up encryption method in separate funct
 
 ### These libs are used for basic funct - network and threading
@@ -110,35 +113,20 @@ cursor.execute('''
         salt TEXT
     );
 ''')
-
 conn.commit()
 
+# Create table to store all user keys and sigs
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS keys (
         user_id INTEGER PRIMARY KEY,
-
-        id_key_public TEXT,
-        id_key_private TEXT,
-
-        pqid_pkey TEXT,
-        pqid_skey TEXT,
-
-        spk_key_public TEXT,
-        spk_key_private TEXT,
-
+        id_key_public TEXT, id_key_private TEXT,
+        pqid_pkey TEXT, pqid_skey TEXT,
+        spk_key_public TEXT, spk_key_private TEXT,
         sig_spk TEXT,
-
-        pqspk_pkey TEXT,
-        pqspk_skey TEXT,
-
+        pqspk_pkey TEXT, pqspk_skey TEXT,
         sig_pqspk TEXT,
-
-        opk_key_public TEXT,
-        opk_key_private TEXT,
-
-        pqopk_pkey TEXT,
-        pqopk_skey TEXT,
-
+        opk_key_public TEXT, opk_key_private TEXT,
+        pqopk_pkey TEXT, pqopk_skey TEXT,
         sig_pqopk TEXT
     );
 ''')
@@ -197,10 +185,9 @@ def server_keygen():
 # ! This function is not used anymore as of test v1.3 Alpha
 # ? server keypairs are stored in memory
 # ? server keypairs are re-generated each runtime 
-# def server_PQ_keygen():
-#     server_pq_key_public, server_pq_key_private = Kyber1024.keygen()
-
-#     return server_pq_key_public, server_pq_key_private
+# // def server_PQ_keygen():
+# //    server_pq_key_public, server_pq_key_private = Kyber1024.keygen()
+# //    return server_pq_key_public, server_pq_key_private
 
 # * This function is to get server private key from .pem file
 def read_server_private_key():
@@ -256,6 +243,83 @@ def init_decrypt(client, session_key):
 
     return login_data
 
+# * This function is to store user keys into database
+# ? No return for this function
+def store_keys(client, username):
+    cursor.execute('SELECT id from users WHERE username = ?;', (username,))
+    user_id = cursor.fetchone()
+    user_id = user_id[0]
+
+    id_key_public = client.recv(1024).decode('utf-8')
+    id_key_private = client.recv(1024).decode('utf-8')
+
+    #print("ok 1")
+    
+    pqid_pkey = client.recv(30720).decode('utf-8')
+    pqid_skey = client.recv(30720).decode('utf-8')
+
+    #print("ok 2")
+
+    spk_key_public = client.recv(1024).decode('utf-8')
+    spk_key_private = client.recv(1024).decode('utf-8')
+
+    #print("ok 3")
+
+    sig_spk = client.recv(20480).decode('utf-8')
+
+    #print("ok 4")
+
+    pqspk_pkey = client.recv(30720).decode('utf-8')
+    pqspk_skey = client.recv(30720).decode('utf-8')
+
+    #print("ok 5")
+
+    sig_pqspk = client.recv(20480).decode('utf-8')
+
+    #print("ok 6")
+
+    opk_key_public = client.recv(1024).decode('utf-8')
+    opk_key_private = client.recv(1024).decode('utf-8')
+
+    #print("ok 7")
+
+    pqopk_pkey = client.recv(30720).decode('utf-8')
+    pqopk_skey = client.recv(30720).decode('utf-8')
+
+    #print("ok 8")
+
+    sig_pqopk = client.recv(20480).decode('utf-8')
+
+    #print("ok 9")
+    #print("ok in recv keys")
+
+    # Insert new keys into the database
+    # ? may need a better way of key mgmt...
+    cursor.execute('''INSERT INTO keys (
+                        user_id,
+                        id_key_public, id_key_private,
+                        pqid_pkey, pqid_skey,
+                        spk_key_public, spk_key_private,
+                        sig_spk,
+                        pqspk_pkey, pqspk_skey,
+                        sig_pqspk,
+                        opk_key_public, opk_key_private,
+                        pqopk_pkey, pqopk_skey,
+                        sig_pqopk) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);''', (
+                        user_id,
+                        id_key_public, id_key_private,
+                        pqid_pkey, pqid_skey,
+                        spk_key_public, spk_key_private,
+                        sig_spk,
+                        pqspk_pkey, pqspk_skey,
+                        sig_pqspk,
+                        opk_key_public, opk_key_private,
+                        pqopk_pkey, pqopk_skey,
+                        sig_pqopk))
+    conn.commit()
+
+# * This function is to retrieve user keys from database after successful login
+# ? This function will send all keys to client
 def retrieve_keys(client, user_id):
     cursor.execute('SELECT * FROM keys WHERE user_id = ?;', (user_id,))
     keys = cursor.fetchone()
@@ -325,26 +389,21 @@ def receive():
         print(f"Connected with {str(address)}!")
 
         # Ask for login or register
-        
-        # ! remove send message to client
-        #client.send("LOGIN_OR_REGISTER".encode('utf-8'))
         login_or_register = client.recv(1024).decode('utf-8')
 
+        # login option
         if login_or_register.lower() == 'login':
-
-            # ! remove send message to client
-            #client.send("LOGIN".encode('utf-8'))
-
-            # initial KEP and decryption on login data
-            session_key = init_ecdh(client)
-            login_data = init_decrypt(client, session_key)
-
-            login_data = login_data.decode('utf-8').split()
-
             try:
+                # initial KEP and decryption on login data
+                session_key = init_ecdh(client)
+                login_data = init_decrypt(client, session_key)
+
+                login_data = login_data.decode('utf-8').split()
                 username = login_data[0]
                 password = login_data[1]
             except IndexError:
+                pass
+            except ValueError:  # ? for except handle ecdh
                 pass
             else:
                 # Retrieve salt for the user
@@ -361,13 +420,16 @@ def receive():
 
                     if user_data:
                         client.send("LOGIN_SUCCESS".encode('utf-8'))
-                        
+
+                        # ? Send all user keys from db to client
                         retrieve_keys(client, user_data[0])
 
                         # Set the username as the nickname
                         nicknames.append(username)
 
                         clients.append(client)
+
+                        print(nicknames)
 
                         print(f"Nickname of the client is {username}")
                         broadcast(f"{username} connected to the server!\n".encode('utf-8'))
@@ -381,131 +443,44 @@ def receive():
                 else:
                     client.send("LOGIN_FAILED".encode('utf-8'))
 
+        # register option
         elif login_or_register.lower() == 'register':
-            # ! remove send message to client
-            #client.send("REGISTER".encode('utf-8'))
-
-            session_key = init_ecdh(client)
-            register_data = init_decrypt(client, session_key)
-
-            register_data = register_data.decode('utf-8').split()
-
             try:
+                session_key = init_ecdh(client)
+                register_data = init_decrypt(client, session_key)
+
+                register_data = register_data.decode('utf-8').split()
                 username = register_data[0]
                 password = register_data[1]
             except IndexError:
                 pass
+            except ValueError:  # ? for except handle ecdh
+                pass
             else:
-                # Generate salt
-                salt = generate_salt()
-
-                # Hash password
-                hashed_password = hash_password(password, salt)
-
-                # Insert new user into the database
-                cursor.execute('INSERT INTO users (username, password, salt) VALUES (?, ?, ?);', (username, hashed_password, salt))
-                conn.commit()
-
-                cursor.execute('SELECT id from users WHERE username = ?;', (username,))
-                user_id = cursor.fetchone()
-                user_id = user_id[0]
-
-                id_key_public = client.recv(1024).decode('utf-8')
-                id_key_private = client.recv(1024).decode('utf-8')
-
-                #print("ok 1")
+                # ! check if there are attempt on insert duplicate username
+                cursor.execute('SELECT id FROM users WHERE username = ?;', (username, ))
                 
-                pqid_pkey = client.recv(30720).decode('utf-8')
-                pqid_skey = client.recv(30720).decode('utf-8')
-
-                #print("ok 2")
-
-                spk_key_public = client.recv(1024).decode('utf-8')
-                spk_key_private = client.recv(1024).decode('utf-8')
-
-                #print("ok 3")
-
-                sig_spk = client.recv(20480).decode('utf-8')
-
-                #print("ok 4")
-
-                pqspk_pkey = client.recv(30720).decode('utf-8')
-                pqspk_skey = client.recv(30720).decode('utf-8')
-
-                #print("ok 5")
-
-                sig_pqspk = client.recv(20480).decode('utf-8')
-
-                #print("ok 6")
-
-                opk_key_public = client.recv(1024).decode('utf-8')
-                opk_key_private = client.recv(1024).decode('utf-8')
-
-                #print("ok 7")
-
-                pqopk_pkey = client.recv(30720).decode('utf-8')
-                pqopk_skey = client.recv(30720).decode('utf-8')
-
-                #print("ok 8")
-
-                sig_pqopk = client.recv(20480).decode('utf-8')
-
-                #print("ok 9")
-                #print("ok in recv keys")
-
-                # Insert new keys into the database
-                # ? may need a better way of key mgmt...
-                cursor.execute('''INSERT INTO keys (
-                                    user_id,
-                                    id_key_public,
-                                    id_key_private,
-                                    
-                                    pqid_pkey,
-                                    pqid_skey,
-
-                                    spk_key_public,
-                                    spk_key_private,
-
-                                    sig_spk,
-
-                                    pqspk_pkey,
-                                    pqspk_skey,
-
-                                    sig_pqspk,
-
-                                    opk_key_public,
-                                    opk_key_private,
-
-                                    pqopk_pkey,
-                                    pqopk_skey,
-                                    sig_pqopk) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);''', (
-                                    user_id,
-                                    id_key_public,
-                                    id_key_private,
-                                    
-                                    pqid_pkey,
-                                    pqid_skey,
-
-                                    spk_key_public,
-                                    spk_key_private,
-
-                                    sig_spk,
-
-                                    pqspk_pkey,
-                                    pqspk_skey,
-
-                                    sig_pqspk,
-
-                                    opk_key_public,
-                                    opk_key_private,
-
-                                    pqopk_pkey,
-                                    pqopk_skey,
-                                    sig_pqopk,))
-                conn.commit()
-
-                client.send("REGISTER_SUCCESS".encode('utf-8'))
+                # ? if username exist, abort register
+                if len(cursor.fetchall()) == 1:
+                    client.send("REGISTER_FAIL".encode('utf-8'))
                 
+                # ? else cont register with username
+                else:
+                    # Generate salt
+                    salt = generate_salt()
+
+                    # Hash password
+                    hashed_password = hash_password(password, salt)
+
+                    # Insert new user into the database
+                    cursor.execute('INSERT INTO users (username, password, salt) VALUES (?, ?, ?);', (username, hashed_password, salt))
+                    conn.commit()
+
+                    client.send("REGISTER_SUCCESS".encode('utf-8'))
+
+                    # ? Insert keys from client to db
+                    store_keys(client, username)
+
         else:
             client.send("INVALID_OPTION".encode('utf-8'))
 
