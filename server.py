@@ -82,7 +82,7 @@ from Crypto.PublicKey import ECC
 from Crypto.Protocol.DH import key_agreement
 from Crypto.Hash import SHAKE128
 from Crypto.Cipher import AES
-from Crypto.Util.Padding import unpad
+from Crypto.Util.Padding import unpad, pad
 
 ### These libs are used for Post-Quantum op.
 from kyber import Kyber1024
@@ -229,6 +229,16 @@ def init_ecdh(client):
     
     return session_key
 
+# * This function is to perform initial encryption of server response
+# ? This function will return encrypted server response
+def init_encrypt(client, session_key, data):
+    cipher = AES.new(session_key, AES.MODE_CBC)
+    data = cipher.encrypt(pad(data.encode('utf-8'), AES.block_size))
+
+    client.send(data)
+    time.sleep(0.05)
+    client.send(cipher.iv)
+
 # * This function is to perform initial decryption of user data
 # ? This function will return decrypted user data
 def init_decrypt(client, session_key):
@@ -320,31 +330,67 @@ def store_keys(client, username):
 
 # * This function is to retrieve user keys from database after successful login
 # ? This function will send all keys to client
-def retrieve_keys(client, user_id):
+def retrieve_user_keys(client, user_id):
     cursor.execute('SELECT * FROM keys WHERE user_id = ?;', (user_id,))
     keys = cursor.fetchone()
 
     client.send(keys[1].encode('utf-8'))
-    time.sleep(0.05)
     client.send(keys[2].encode('utf-8'))
     time.sleep(0.05)
     client.send(keys[3].encode('utf-8'))
-    time.sleep(0.05)
     client.send(keys[4].encode('utf-8'))
     time.sleep(0.05)
     client.send(keys[5].encode('utf-8'))
-    time.sleep(0.05)
     client.send(keys[6].encode('utf-8'))
     time.sleep(0.05)
-    client.send(keys[8].encode('utf-8'))
+    client.send(keys[7].encode('utf-8'))
     time.sleep(0.05)
+    client.send(keys[8].encode('utf-8'))
     client.send(keys[9].encode('utf-8'))
+    time.sleep(0.05)
+    client.send(keys[10].encode('utf-8'))
     time.sleep(0.05)
     client.send(keys[11].encode('utf-8'))
     client.send(keys[12].encode('utf-8'))
     time.sleep(0.05)
     client.send(keys[13].encode('utf-8'))
     client.send(keys[14].encode('utf-8'))
+    time.sleep(0.05)
+    client.send(keys[15].encode('utf-8'))
+
+# * This function is to retrieve all pubkeys, sigs of users in server session,
+# ? This function send all keys and sigs of connected clients to client
+def retrieve_user_keys_sigs(client, session_key, nicknames):
+    if len(nicknames) <= 1:
+        init_encrypt(client, session_key, "SELF_CALC")
+    else:
+        init_encrypt(client, session_key, str(len(nicknames)))
+        for nickname in nicknames:
+            cursor.execute('SELECT id FROM users WHERE username = ?', (nickname, ))
+            user_id = cursor.fetchone[0]
+
+            # cursor.commit('''SELECT id_key_public, pqid_pkey, spk_key_public, sig_spk,
+            #                 pqspk_pkey, sig_pqspk, opk_key_public, pqopk_pkey, sig_pqopk
+            #                 FROM keys WHERE user_id = ?''', (user_id, ))
+            # keys = cursor.fetchone
+
+            # client.send(keys[1].encode('utf-8'))
+            # time.sleep(0.05)
+            # client.send(keys[2].encode('utf-8'))
+            # time.sleep(0.05)
+            # client.send(keys[3].encode('utf-8'))
+            # time.sleep(0.05)
+            # client.send(keys[4].encode('utf-8'))
+            # time.sleep(0.05)
+            # client.send(keys[5].encode('utf-8'))
+            # time.sleep(0.05)
+            # client.send(keys[6].encode('utf-8'))
+            # time.sleep(0.05)
+            # client.send(keys[7].encode('utf-8'))
+            # time.sleep(0.05)
+            # client.send(keys[8].encode('utf-8'))
+            # time.sleep(0.05)
+            # client.send(keys[9].encode('utf-8'))
 
 # * This function is to generate a random 16-byte salt for pass hash
 def generate_salt():
@@ -369,14 +415,22 @@ def handle(client):
             # ! remove logging in server - based
             #print(f"{nicknames[clients.index(client)]} says {message}")
             broadcast(message)
-        except:
-            index = clients.index(client)
-            clients.remove(client)
-            client.close()
 
+            # ? remove client from server list on exit
+            # ! might need to revise method since user can malice type "LOG_OUT" lole
+            if message.decode('utf-8') == "LOG_OUT":
+                raise ConnectionError
+        except ConnectionError:
+            index = clients.index(client)
             nickname = nicknames[index]
+
+            print(f"{nickname} has logged out or exited the session!")
+            #broadcast(f"{nickname} has logged out or exited the session!")
+
+            clients.remove(client)
             nicknames.remove(nickname)
 
+            client.close()
             break
 
 # * This function is to accept incoming conn from client
@@ -408,7 +462,8 @@ def receive():
             else:
                 # ! prevent same acc login twice
                 if username in nicknames:
-                    client.send("LOGIN_DUPE".encode('utf-8'))
+                    init_encrypt(client, session_key, "LOGIN_DUPE")
+                    #client.send("LOGIN_DUPE".encode('utf-8'))
                 
                 # else account has not log in yet, proceed login
                 else:
@@ -425,17 +480,18 @@ def receive():
                         user_data = cursor.fetchone()
 
                         if user_data:
-                            client.send("LOGIN_SUCCESS".encode('utf-8'))
+                            init_encrypt(client, session_key, "LOGIN_SUCCESS")
+                            #client.send("LOGIN_SUCCESS".encode('utf-8'))
 
                             # ? Send all user keys from db to client
-                            retrieve_keys(client, user_data[0])
+                            retrieve_user_keys(client, user_data[0])
 
                             # Set the username as the nickname
                             nicknames.append(username)
 
                             clients.append(client)
 
-                            print(nicknames)
+                            retrieve_user_keys_sigs(client, session_key, nicknames)
 
                             print(f"Nickname of the client is {username}")
                             broadcast(f"{username} connected to the server!\n".encode('utf-8'))
@@ -444,10 +500,12 @@ def receive():
                             thread = threading.Thread(target=handle, args=(client,))
                             thread.start()
                         else:
-                            client.send("LOGIN_FAILED".encode('utf-8'))
+                            init_encrypt(client, session_key, "LOGIN_FAILED")
+                            #client.send("LOGIN_FAILED".encode('utf-8'))
 
                     else:
-                        client.send("LOGIN_FAILED".encode('utf-8'))
+                        init_encrypt(client, session_key, "LOGIN_FAILED")
+                        #client.send("LOGIN_FAILED".encode('utf-8'))
 
         # register option
         elif login_or_register.lower() == 'register':
@@ -468,7 +526,8 @@ def receive():
                 
                 # ? if username exist, abort register
                 if len(cursor.fetchall()) == 1:
-                    client.send("REGISTER_FAIL".encode('utf-8'))
+                    init_encrypt(client, session_key, "REGISTER_FAIL")
+                    #client.send("REGISTER_FAIL".encode('utf-8'))
                 
                 # ? else cont register with username
                 else:
@@ -482,7 +541,8 @@ def receive():
                     cursor.execute('INSERT INTO users (username, password, salt) VALUES (?, ?, ?);', (username, hashed_password, salt))
                     conn.commit()
 
-                    client.send("REGISTER_SUCCESS".encode('utf-8'))
+                    init_encrypt(client, session_key, "REGISTER_SUCCESS")
+                    #client.send("REGISTER_SUCCESS".encode('utf-8'))
 
                     # ? Insert keys from client to db
                     store_keys(client, username)

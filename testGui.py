@@ -176,13 +176,25 @@ class Client:
         return session_key
 
     # * This function is to perform initial encryption of user data
-    # ? This function will return decrypted user data
+    # ? This function will return encrypted user data
     def init_encrypt(self, session_key, data):
         cipher = AES.new(session_key, AES.MODE_CBC)
         data = cipher.encrypt(pad(data.encode('utf-8'), AES.block_size))
 
         self.sock.send(data)
+        time.sleep(0.05)
         self.sock.send(cipher.iv)
+
+    # * This function is to perform initial decryption of server response
+    # ? This function will return decrypted server response
+    def init_decrypt(self, session_key):
+        data = self.sock.recv(1024)
+        iv = self.sock.recv(1024)
+
+        cipher = AES.new(session_key, AES.MODE_CBC, iv)
+        data = unpad(cipher.decrypt(data), AES.block_size)
+
+        return data.decode('utf-8')
 
     # * This function is to perform initial PQXDH key generation and 
     # * management on client-server
@@ -193,50 +205,59 @@ class Client:
         # if login, retrieve all keys belong to user
         # ? decrypt all privkeys with kdf(pwd)
         if state == "login":
-            id_key_public = ECC.import_key(self.sock.recv(1024).decode('utf-8'))
+            self.id_key_public = ECC.import_key(self.sock.recv(1024).decode('utf-8'))
             json_key = self.sock.recv(1024).decode('utf-8')
             json_key = json.loads(json_key)
             cipher = AES.new(self.kdf(pwd.encode('utf-8')), AES.MODE_CBC, b64decode(json_key['iv']))
-            id_key_private = unpad(cipher.decrypt(b64decode(json_key['id_key_private'])), AES.block_size)
-            id_key_private = ECC.import_key(id_key_private.decode('utf-8'))
+            self.id_key_private = unpad(cipher.decrypt(b64decode(json_key['id_key_private'])), AES.block_size)
+            self.id_key_private = ECC.import_key(self.id_key_private.decode('utf-8'))
 
-            pqid_pkey = self.sock.recv(30720).decode('utf-8')
-            pqid_pkey = b64decode(pqid_pkey)
+            self.pqid_pkey = self.sock.recv(30720).decode('utf-8')
+            self.pqid_pkey = b64decode(self.pqid_pkey)
 
             json_key = self.sock.recv(30720).decode('utf-8')
             json_key = json.loads(json_key)
             cipher = AES.new(self.kdf(pwd.encode('utf-8')), AES.MODE_CBC, b64decode(json_key['iv']))
-            pqid_skey = unpad(cipher.decrypt(b64decode(json_key['pqid_skey'])), AES.block_size)
+            self.pqid_skey = unpad(cipher.decrypt(b64decode(json_key['pqid_skey'])), AES.block_size)
 
-            spk_key_public = ECC.import_key(self.sock.recv(1024).decode('utf-8'))
+            self.spk_key_public = ECC.import_key(self.sock.recv(1024).decode('utf-8'))
             json_key = self.sock.recv(1024).decode('utf-8')
             json_key = json.loads(json_key)
             cipher = AES.new(self.kdf(pwd.encode('utf-8')), AES.MODE_CBC, b64decode(json_key['iv']))
-            spk_key_private = unpad(cipher.decrypt(b64decode(json_key['spk_key_private'])), AES.block_size)
-            spk_key_private = ECC.import_key(spk_key_private.decode('utf-8'))
+            self.spk_key_private = unpad(cipher.decrypt(b64decode(json_key['spk_key_private'])), AES.block_size)
+            self.spk_key_private = ECC.import_key(self.spk_key_private.decode('utf-8'))
 
-            pqspk_pkey = self.sock.recv(30720).decode('utf-8')
-            pqspk_pkey = b64decode(pqspk_pkey)
+            self.sig_spk = self.sock.recv(20480).decode('utf-8')
+            self.sig_spk = b64decode(self.sig_spk)
+
+            self.pqspk_pkey = self.sock.recv(30720).decode('utf-8')
+            self.pqspk_pkey = b64decode(self.pqspk_pkey)
 
             json_key = self.sock.recv(30720).decode('utf-8')
             json_key = json.loads(json_key)
             cipher = AES.new(self.kdf(pwd.encode('utf-8')), AES.MODE_CBC, b64decode(json_key['iv']))
-            pqspk_skey = unpad(cipher.decrypt(b64decode(json_key['pqspk_skey'])), AES.block_size)
+            self.pqspk_skey = unpad(cipher.decrypt(b64decode(json_key['pqspk_skey'])), AES.block_size)
+
+            self.sig_pqspk = self.sock.recv(20480).decode('utf-8')
+            self.sig_pqspk = b64decode(self.sig_pqspk)
 
             opk_key_public = ECC.import_key(self.sock.recv(1024).decode('utf-8'))
             json_key = self.sock.recv(1024).decode('utf-8')
             json_key = json.loads(json_key)
             cipher = AES.new(self.kdf(pwd.encode('utf-8')), AES.MODE_CBC, b64decode(json_key['iv']))
-            opk_key_private = unpad(cipher.decrypt(b64decode(json_key['opk_key_private'])), AES.block_size)
-            opk_key_private = ECC.import_key(opk_key_private.decode('utf-8'))
+            self.opk_key_private = unpad(cipher.decrypt(b64decode(json_key['opk_key_private'])), AES.block_size)
+            self.opk_key_private = ECC.import_key(self.opk_key_private.decode('utf-8'))
 
-            pqopk_pkey = self.sock.recv(30720).decode('utf-8')
-            pqopk_pkey = b64decode(pqopk_pkey) 
+            self.pqopk_pkey = self.sock.recv(30720).decode('utf-8')
+            self.pqopk_pkey = b64decode(self.pqopk_pkey) 
 
             json_key = self.sock.recv(30720).decode('utf-8')
             json_key = json.loads(json_key)
             cipher = AES.new(self.kdf(pwd.encode('utf-8')), AES.MODE_CBC, b64decode(json_key['iv']))
-            pqopk_skey = unpad(cipher.decrypt(b64decode(json_key['pqopk_skey'])), AES.block_size)
+            self.pqopk_skey = unpad(cipher.decrypt(b64decode(json_key['pqopk_skey'])), AES.block_size)
+
+            self.sig_pqopk = self.sock.recv(20480).decode('utf-8')
+            self.sig_pqopk = b64decode(self.sig_pqopk)
 
         # if register first time, publish all keys to server
         # ! may not be best way to do but encrypt all privkeys 
@@ -350,11 +371,33 @@ class Client:
             self.sock.send(pqopk_skey.encode('utf-8'))
             time.sleep(0.05)
             self.sock.send(str(sig_pqopk).encode('utf-8'))
-            time.sleep(0.05)
 
-    def calc_pqxdh():
-        pass
+    # * This function is to perform retrieve PQXDH keys from other users 
+    # * and perform calculation of secret key from all keypairs
+    # ? If only one user in session, self-calc SK
+    # ? If > one user in session, retrieve all pubkeys, sigs 
+    # ? and perform calc SK
+    def calc_pqxdh(self, session_key):
+        user_in_session = self.init_decrypt(session_key)
 
+        if user_in_session == "SELF_CALC":
+
+            # verify keys sent from server
+            verifier = eddsa.new(self.id_key_public, 'rfc8032')
+
+            try:
+                verifier.verify(SHA512.new(self.spk_key_public.export_key(format='DER')), self.sig_spk)
+                verifier.verify(SHA512.new(self.pqspk_pkey), self.sig_pqspk)
+                verifier.verify(SHA512.new(self.pqopk_pkey), self.sig_pqopk)
+                
+            except ValueError:
+                print("Key from server are not authentic!")
+            else:
+                print("Key from server are authentic!")
+        else:
+            print("OK")
+            #for user in user_in_session:
+            #    pass
 
 
     # * This function is to ask users whether to login or register
@@ -494,13 +537,14 @@ class Client:
         self.init_encrypt(session_key, login_data)
 
         # Wait for server response
-        login_response = self.sock.recv(1024).decode('utf-8')
+        login_response = self.init_decrypt(session_key)
 
         # if login success, goto message_gui
         if login_response == "LOGIN_SUCCESS":
             self.login_win.destroy()
 
             self.init_pqxdh("login", self.password)
+            self.calc_pqxdh(session_key)
 
             self.nickname = self.username
             self.gui_done = False
@@ -560,9 +604,11 @@ class Client:
             self.init_encrypt(session_key, register_data)
 
             # Wait for server response
-            register_response = self.sock.recv(1024).decode('utf-8')
+            register_response = self.init_decrypt(session_key)
+
             if register_response == "REGISTER_SUCCESS":
                 self.init_pqxdh(state="register", pwd=self.password)
+                self.calc_pqxdh(session_key)
                 messagebox.showinfo(title="Info", message="Registration complete. Please log in using your username and password.")
                 
                 # ! same handle case as login, close and re-init conn after exit win
@@ -652,9 +698,11 @@ class Client:
 
     def stop(self):
         self.running = False
+        self.sock.send("LOG_OUT".encode('utf-8'))
         self.win.destroy()
         self.sock.close()
         exit(0)
+        return
 
     # * This function is to receive message from server and display it in 
     # * message_gui
@@ -677,7 +725,9 @@ class Client:
                 break
             except:
                 print("Error")
-                self.sock.close()
+                self.stop()
+                #self.sock.close()
                 break
 
 client = Client(HOST, PORT)
+exit(0)
