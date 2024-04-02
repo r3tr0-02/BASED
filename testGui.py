@@ -104,7 +104,7 @@ client = Client(HOST, PORT)
 # // TODO : except handling on exit (init ecdh-encrypt)
 # // TODO : polish login-retrieve key (encrypt curve skeys)
 # // TODO : how to encrypt and handle priv keys in db? 
-# ! TODO : polish clean exit - threading err
+# // ! TODO : polish clean exit - threading err
 
 ### These libs are used for basic funct - network and threading
 from base64 import b64encode, b64decode
@@ -112,6 +112,7 @@ import json
 import time
 import socket
 import threading
+import os
 
 ### These libs are used for GUI generation
 import tkinter as tk
@@ -682,27 +683,26 @@ class Client:
         self.running = False
         self.login_or_register_win.destroy()
         self.sock.close()
-        exit(0)
+        os._exit(0)
 
     def stop_login(self):
         self.running = False
         self.login_win.destroy()
         self.sock.close()
-        exit(0)
+        os._exit(0)
 
     def stop_register(self):
         self.running = False
         self.register_win.destroy()
         self.sock.close()
-        exit(0)
+        os._exit(0)
 
     def stop(self):
         self.running = False
         self.sock.send("LOG_OUT".encode('utf-8'))
         self.win.destroy()
         self.sock.close()
-        exit(0)
-        return
+        os._exit(0)
 
     # * This function is to receive message from server and display it in 
     # * message_gui
@@ -730,4 +730,3 @@ class Client:
                 break
 
 client = Client(HOST, PORT)
-exit(0)
