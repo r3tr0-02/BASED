@@ -186,6 +186,63 @@ class Client:
         time.sleep(0.05)
         self.sock.send(cipher.iv)
 
+    # * This function is to perform message encryption using AEAD scheme
+    # * - This function will also perform message signing with Dilithium
+    # ? This function will return encrypted message data
+    def init_encrypt_aead(self, secret_key, data):
+
+        # sign message upon receive msg
+        msg_sig = self.sign_msg(self.pqid_skey, data)
+
+        cipher = AES.new(secret_key, AES.MODE_EAX)
+        cipher.update(self.header)
+        ct, tag = cipher.encrypt_and_digest(data.encode('utf-8'))
+
+        # zip every elem in json format 
+        json_k = ['nonce', 'header', 'ct', 'tag', 'msg_sig']
+        json_v = [b64encode(x).decode('utf-8') for x in (cipher.nonce, self.header, ct, tag, msg_sig)]
+        json_ct = json.dumps(dict(zip(json_k, json_v)))
+
+        return json_ct
+
+    # * This function is to perform message decryption using AEAD scheme
+    # * - This function will also perform message verification
+    # ? This function will return the decrypted message 
+    # ? along with message verification indication 
+    def init_decrypt_aead(self, secret_key, data):
+        try:
+            b64 = json.loads(data)
+            json_k = [ 'nonce', 'header', 'ct', 'tag', 'msg_sig' ]
+            json_v = {k:b64decode(b64[k]) for k in json_k}
+
+            cipher = AES.new(secret_key, AES.MODE_EAX, nonce=json_v['nonce'])
+            cipher.update(json_v['header'])
+            pt = cipher.decrypt_and_verify(json_v['ct'], json_v['tag'])
+            pt = pt.decode('utf-8')
+
+            msg_verify = self.verify_msg(self.pqid_pkey, pt, json_v['msg_sig'])
+
+            # concat verification indication with message
+            return pt + msg_verify
+
+        except Exception as e:
+            pass
+
+    # * This function is to perform message signing
+    # ? This function will return msg_sig called to init_encrypt_aead()
+    def sign_msg(self, pqid_skey, data):
+        return dilithium5.sign(SHA512.new(data.encode('utf-8')).digest(), pqid_skey)
+
+    # * This function is to perform message verification
+    # ? This function will return str OK on successful verify
+    # ? or str NOT OK on failed verify
+    def verify_msg(self, pqid_pkey, pt, msg_sig):
+        try:
+            dilithium5.verify(msg_sig, SHA512.new(pt.encode('utf-8')).digest(), pqid_pkey)
+            return " - OK"
+        except ValueError:
+            return "  - NOT OK"
+
     # * This function is to perform initial decryption of server response
     # ? This function will return decrypted server response
     def init_decrypt(self, session_key):
@@ -242,7 +299,7 @@ class Client:
             self.sig_pqspk = self.sock.recv(20480).decode('utf-8')
             self.sig_pqspk = b64decode(self.sig_pqspk)
 
-            opk_key_public = ECC.import_key(self.sock.recv(1024).decode('utf-8'))
+            self.opk_key_public = ECC.import_key(self.sock.recv(1024).decode('utf-8'))
             json_key = self.sock.recv(1024).decode('utf-8')
             json_key = json.loads(json_key)
             cipher = AES.new(self.kdf(pwd.encode('utf-8')), AES.MODE_CBC, b64decode(json_key['iv']))
@@ -395,6 +452,22 @@ class Client:
                 print("Key from server are not authentic!")
             else:
                 print("Key from server are authentic!")
+
+                ep_key = ECC.generate(curve='ed25519')
+                self.ep_key_public = ep_key.public_key()
+                self.ep_key_private = ep_key
+
+                ct_a, ss_a = Kyber1024.enc(self.pqopk_pkey)
+
+                dh_1 = key_agreement(static_priv=self.id_key_private, static_pub=self.spk_key_public, kdf=self.kdf)
+                dh_2 = key_agreement(static_priv=self.ep_key_private, static_pub=self.id_key_public, kdf=self.kdf)
+                dh_3 = key_agreement(static_priv=self.ep_key_private, static_pub=self.spk_key_public, kdf=self.kdf)
+                dh_4 = key_agreement(static_priv=self.ep_key_private, static_pub=self.opk_key_public, kdf=self.kdf)
+
+                self.secret_key = self.kdf(dh_1 + dh_2 + dh_3 + dh_4 + ss_a)
+
+                self.header = self.id_key_public.export_key(format='DER')
+
         else:
             print("OK")
             #for user in user_in_session:
@@ -414,17 +487,17 @@ class Client:
         alignstr = '%dx%d+%d+%d' % (width, height, (screenwidth - width) / 2, (screenheight - height) / 2)
         self.login_or_register_win.geometry(alignstr)
 
-        self.logo_label = tk.Label(self.login_or_register_win, text="BASED", background="white")
-        self.logo_label.config(font=("Arial", 56))
-        self.logo_label.pack(padx=100, pady=50)
+        logo_label = tk.Label(self.login_or_register_win, text="BASED", background="white")
+        logo_label.config(font=("Arial", 56))
+        logo_label.pack(padx=100, pady=50)
 
-        self.login_button = tk.Button(self.login_or_register_win, text="Login", command=self.login_gui)
-        self.login_button.config(font=("Arial", 12))
-        self.login_button.pack(padx=20, pady=10)
+        login_button = tk.Button(self.login_or_register_win, text="Login", command=self.login_gui)
+        login_button.config(font=("Arial", 12))
+        login_button.pack(padx=20, pady=10)
 
-        self.register_button = tk.Button(self.login_or_register_win, text="Register", command=self.register_gui)
-        self.register_button.config(font=("Arial", 12))
-        self.register_button.pack(padx=20, pady=10)
+        register_button = tk.Button(self.login_or_register_win, text="Register", command=self.register_gui)
+        register_button.config(font=("Arial", 12))
+        register_button.pack(padx=20, pady=10)
 
         self.login_or_register_win.protocol("WM_DELETE_WINDOW", self.stop_login_register)
 
@@ -446,23 +519,23 @@ class Client:
         alignstr = '%dx%d+%d+%d' % (width, height, (screenwidth - width) / 2, (screenheight - height) / 2)
         self.login_win.geometry(alignstr)
 
-        self.username_label = tk.Label(self.login_win, text="Username : ", bg="lightgreen")
-        self.username_label.config(font=("Arial", 12))
-        self.username_label.pack(padx=20, pady=5)
+        username_label = tk.Label(self.login_win, text="Username : ", bg="lightgreen")
+        username_label.config(font=("Arial", 12))
+        username_label.pack(padx=20, pady=5)
 
         self.username_input = tk.Text(self.login_win, height=3)
         self.username_input.pack(padx=20, pady=5)
 
-        self.password_label = tk.Label(self.login_win, text="Password :", bg="lightgreen")
-        self.password_label.config(font=("Arial", 12))
-        self.password_label.pack(padx=20, pady=5)
+        password_label = tk.Label(self.login_win, text="Password :", bg="lightgreen")
+        password_label.config(font=("Arial", 12))
+        password_label.pack(padx=20, pady=5)
 
         self.password_input = tk.Text(self.login_win, height=3)
         self.password_input.pack(padx=20, pady=5)
 
-        self.send_button = tk.Button(self.login_win, text="Login", command=self.login)
-        self.send_button.config(font=("Arial", 12))
-        self.send_button.pack(padx=20, pady=5)
+        send_button = tk.Button(self.login_win, text="Login", command=self.login)
+        send_button.config(font=("Arial", 12))
+        send_button.pack(padx=20, pady=5)
 
         self.login_win.protocol("WM_DELETE_WINDOW", self.stop_login)
 
@@ -488,30 +561,30 @@ class Client:
         alignstr = '%dx%d+%d+%d' % (width, height, (screenwidth - width) / 2, (screenheight - height) / 2)
         self.register_win.geometry(alignstr)
 
-        self.username_label = tk.Label(self.register_win, text="Username : ", bg="lightgreen")
-        self.username_label.config(font=("Arial", 12))
-        self.username_label.pack(padx=20, pady=5)
+        username_label = tk.Label(self.register_win, text="Username : ", bg="lightgreen")
+        username_label.config(font=("Arial", 12))
+        username_label.pack(padx=20, pady=5)
 
         self.username_input = tk.Text(self.register_win, height=3)
         self.username_input.pack(padx=20, pady=5)
 
-        self.password_label = tk.Label(self.register_win, text="Password :", bg="lightgreen")
-        self.password_label.config(font=("Arial", 12))
-        self.password_label.pack(padx=20, pady=5)
+        password_label = tk.Label(self.register_win, text="Password :", bg="lightgreen")
+        password_label.config(font=("Arial", 12))
+        password_label.pack(padx=20, pady=5)
 
         self.password_input = tk.Text(self.register_win, height=3)
         self.password_input.pack(padx=20, pady=5)
 
-        self.confirm_password_label = tk.Label(self.register_win, text="Confirm Password :", bg="lightgreen")
-        self.confirm_password_label.config(font=("Arial", 12))
-        self.confirm_password_label.pack(padx=20, pady=5)
+        confirm_password_label = tk.Label(self.register_win, text="Confirm Password :", bg="lightgreen")
+        confirm_password_label.config(font=("Arial", 12))
+        confirm_password_label.pack(padx=20, pady=5)
 
         self.confirm_password_input = tk.Text(self.register_win, height=3)
         self.confirm_password_input.pack(padx=20, pady=5)
 
-        self.send_button = tk.Button(self.register_win, text="Register", command=self.register)
-        self.send_button.config(font=("Arial", 12))
-        self.send_button.pack(padx=20, pady=5)
+        send_button = tk.Button(self.register_win, text="Register", command=self.register)
+        send_button.config(font=("Arial", 12))
+        send_button.pack(padx=20, pady=5)
 
         self.register_win.protocol("WM_DELETE_WINDOW", self.stop_register)
 
@@ -525,12 +598,12 @@ class Client:
     # ? After login, this function will goto message_gui
     # ! If login fail, this function will goto login_or_register_gui
     def login(self):
-        self.username = self.username_input.get('1.0', 'end-1c')
-        self.password = self.password_input.get('1.0', 'end-1c')
+        username = self.username_input.get('1.0', 'end-1c')
+        password = self.password_input.get('1.0', 'end-1c')
 
         # ! input might get sanitized here
 
-        login_data = f"{self.username} {self.password}"
+        login_data = f"{username} {password}"
 
         # initial KEP and encryption on login data
         # ? encrypted data will be sent on encrypt()
@@ -544,10 +617,10 @@ class Client:
         if login_response == "LOGIN_SUCCESS":
             self.login_win.destroy()
 
-            self.init_pqxdh("login", self.password)
+            self.init_pqxdh("login", password)
             self.calc_pqxdh(session_key)
 
-            self.nickname = self.username
+            self.nickname = username
             self.gui_done = False
             self.running = True
 
@@ -590,14 +663,14 @@ class Client:
     # ! If register fail, this function will either display err msg
     # ! or goto login_or_register_gui
     def register(self):
-        self.username = self.username_input.get('1.0', 'end-1c')
-        self.password = self.password_input.get('1.0', 'end-1c')
-        self.confirm_password = self.confirm_password_input.get('1.0', 'end-1c')
+        username = self.username_input.get('1.0', 'end-1c')
+        password = self.password_input.get('1.0', 'end-1c')
+        confirm_password = self.confirm_password_input.get('1.0', 'end-1c')
 
         # ! input might get sanitized here
 
-        if self.password == self.confirm_password and (len(self.password) != 0 and len(self.confirm_password) != 0):
-            register_data = f"{self.username} {self.password}"
+        if password == confirm_password and (len(password) != 0 and len(confirm_password) != 0):
+            register_data = f"{username} {password}"
             
             # initial KEP and encryption on login data
             # ? encrypted data will be sent on encrypt()
@@ -632,7 +705,6 @@ class Client:
     # * from other users
     def message_gui(self):
         self.win = tk.Tk()
-        #self.win.configure()
         self.win.title("Message")
         self.win.configure(bg="lightgreen")
 
@@ -643,24 +715,24 @@ class Client:
         alignstr = '%dx%d+%d+%d' % (width, height, (screenwidth - width) / 2, (screenheight - height) / 2)
         self.win.geometry(alignstr)
 
-        self.chat_label = tk.Label(self.win, text="Chat:", bg="lightgreen")
-        self.chat_label.config(font=("Arial", 12))
-        self.chat_label.pack(padx=20, pady=5)
+        chat_label = tk.Label(self.win, text="Chat:", bg="lightgreen")
+        chat_label.config(font=("Arial", 12))
+        chat_label.pack(padx=20, pady=5)
 
         self.text_area = tk.scrolledtext.ScrolledText(self.win)
         self.text_area.pack(padx=20, pady=5)
         self.text_area.config(state='disabled')
         
-        self.msg_label = tk.Label(self.win, text="Message:", bg="lightgreen")
-        self.msg_label.config(font=("Arial", 12))
-        self.msg_label.pack(padx=20, pady=5)
+        msg_label = tk.Label(self.win, text="Message:", bg="lightgreen")
+        msg_label.config(font=("Arial", 12))
+        msg_label.pack(padx=20, pady=5)
 
         self.input_area = tk.Text(self.win, height=3)
         self.input_area.pack(padx=20, pady=5)
 
-        self.send_button = tk.Button(self.win, text="Send", command=self.write)
-        self.send_button.config(font=("Arial", 12))
-        self.send_button.pack(padx=20, pady=5)
+        send_button = tk.Button(self.win, text="Send", command=self.write)
+        send_button.config(font=("Arial", 12))
+        send_button.pack(padx=20, pady=5)
 
         self.gui_done = True
 
@@ -671,9 +743,11 @@ class Client:
     # * This function is to send message from user to server for it to be 
     # * broadcasted to other users
     def write(self):
-        message = f"{self.nickname}: {self.input_area.get('1.0', 'end')}"
+        message = f"{self.nickname}: {self.input_area.get('1.0', 'end-1c')}"
 
-        # ! encrypt here
+        # encrypt here
+        message = self.init_encrypt_aead(self.secret_key, message)
+
         self.sock.send(message.encode('utf-8'))
         self.input_area.delete('1.0', 'end')
 
@@ -711,19 +785,30 @@ class Client:
     def receive(self):
         while self.running:
             try:
-                # ! decrypt here
-                message = self.sock.recv(1024).decode('utf-8')
+                # decrypt here
+                message = self.sock.recv(30720).decode('utf-8')
+
                 if message == 'NICK':
                     self.sock.send(self.nickname.encode('utf-8'))
-                else:
+
+                # ! need to revisit this method in future 
+                # ! - ignore attempt on decrypt aead on server resp 
+                if "to the server" not in message:
+                    try:
+                        message = self.init_decrypt_aead(self.secret_key, message)
+                    except:
+                        pass
+
                     if self.gui_done:
                         self.text_area.config(state='normal')
-                        self.text_area.insert('end', message)
+                        self.text_area.insert('end', message + "\n")
                         self.text_area.yview('end')
                         self.text_area.config(state='disabled')
+                    
             except ConnectionAbortedError:
                 break
             except:
+                #print(e)
                 print("Error")
                 self.stop()
                 #self.sock.close()

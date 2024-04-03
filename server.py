@@ -373,7 +373,9 @@ def retrieve_user_keys_sigs(client, session_key, nicknames):
         init_encrypt(client, session_key, str(len(nicknames)))
         for nickname in nicknames:
             cursor.execute('SELECT id FROM users WHERE username = ?', (nickname, ))
-            user_id = cursor.fetchone[0]
+            user_id = cursor.fetchone()
+
+            print(user_id[0])
 
             # cursor.commit('''SELECT id_key_public, pqid_pkey, spk_key_public, sig_spk,
             #                 pqspk_pkey, sig_pqspk, opk_key_public, pqopk_pkey, sig_pqopk
@@ -416,22 +418,25 @@ def broadcast(message):
 def handle(client):
     while True:
         try:
-            message = client.recv(1024)
+            message = client.recv(30720)
             
             # ! remove logging in server - based
             #print(f"{nicknames[clients.index(client)]} says {message}")
-            broadcast(message)
+            
 
             # ? remove client from server list on exit
             # ! might need to revise method since user can malice type "LOG_OUT" lole
             if message.decode('utf-8') == "LOG_OUT":
                 raise ConnectionError
+            else:
+                broadcast(message)
+
         except ConnectionError:
             index = clients.index(client)
             nickname = nicknames[index]
 
             print(f"{nickname} has logged out or exited the session!")
-            #broadcast(f"{nickname} has logged out or exited the session!")
+            broadcast(f"{nickname} has logged out or exited the session!".encode('utf-8'))
 
             clients.remove(client)
             nicknames.remove(nickname)
