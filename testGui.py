@@ -17,7 +17,7 @@ class Client:
         msg = tk.Tk()
         msg.withdraw()
 
-        self.nickname = simpledialog.askstring("Nickname", "Please choose a nickname", parent=msg)
+        self.nickname = simpledialog.asksctring("Nickname", "Please choose a nickname", parent=msg)
 
         self.gui_done = False
         self.running = True
@@ -100,6 +100,7 @@ client = Client(HOST, PORT)
 # TODO : start init. pqxdh key gen
 # TODO : start calc pqxdh sk - get current clients in session, then update SK each time?
 # TODO : research on how to do clients > 2 ?
+    # TODO : resort to askMsguser? 
 # TODO : research on what happen if client exit?
 # // TODO : except handling on exit (init ecdh-encrypt)
 # // TODO : polish login-retrieve key (encrypt curve skeys)
@@ -171,15 +172,14 @@ class Client:
         server_key_public = ECC.import_key(self.sock.recv(1024).decode('utf-8'))
 
         # perform ecdh on client-server
-        session_key = key_agreement(static_priv=self.user_key_private,
+        self.session_key = key_agreement(static_priv=self.user_key_private,
                                         static_pub=server_key_public,
                                         kdf=self.kdf)
-        return session_key
 
     # * This function is to perform initial encryption of user data
     # ? This function will return encrypted user data
-    def init_encrypt(self, session_key, data):
-        cipher = AES.new(session_key, AES.MODE_CBC)
+    def init_encrypt(self, data):
+        cipher = AES.new(self.session_key, AES.MODE_CBC)
         data = cipher.encrypt(pad(data.encode('utf-8'), AES.block_size))
 
         self.sock.send(data)
@@ -245,11 +245,11 @@ class Client:
 
     # * This function is to perform initial decryption of server response
     # ? This function will return decrypted server response
-    def init_decrypt(self, session_key):
+    def init_decrypt(self):
         data = self.sock.recv(1024)
         iv = self.sock.recv(1024)
 
-        cipher = AES.new(session_key, AES.MODE_CBC, iv)
+        cipher = AES.new(self.session_key, AES.MODE_CBC, iv)
         data = unpad(cipher.decrypt(data), AES.block_size)
 
         return data.decode('utf-8')
@@ -435,18 +435,46 @@ class Client:
     # ? If only one user in session, self-calc SK
     # ? If > one user in session, retrieve all pubkeys, sigs 
     # ? and perform calc SK
-    def calc_pqxdh(self, session_key):
-        user_in_session = self.init_decrypt(session_key)
+    def calc_pqxdh(self):
+        askUser = self.username_input.get('1.0', 'end-1c')
+        askUser = f'{askUser}'
 
-        if user_in_session == "SELF_CALC":
+        self.init_encrypt(askUser)
+
+        pqxdh_mode = self.init_decrypt()
+
+        if pqxdh_mode == "ENC":
+            id_key_public = ECC.import_key(self.sock.recv(1024).decode('utf-8'))
+
+            pqid_pkey = self.sock.recv(30720).decode('utf-8')
+            pqid_pkey = b64decode(pqid_pkey)
+
+            spk_key_public = ECC.import_key(self.sock.recv(1024).decode('utf-8'))
+
+            sig_spk = self.sock.recv(20480).decode('utf-8')
+            sig_spk = b64decode(sig_spk)
+
+            pqspk_pkey = self.sock.recv(30720).decode('utf-8')
+            pqspk_pkey = b64decode(pqspk_pkey)
+
+            sig_pqspk = self.sock.recv(20480).decode('utf-8')
+            sig_pqspk = b64decode(sig_pqspk)
+
+            opk_key_public = ECC.import_key(self.sock.recv(1024).decode('utf-8'))
+
+            pqopk_pkey = self.sock.recv(30720).decode('utf-8')
+            pqopk_pkey = b64decode(pqopk_pkey)
+
+            sig_pqopk = self.sock.recv(20480).decode('utf-8')
+            sig_pqopk = b64decode(sig_pqopk)
 
             # verify keys sent from server
-            verifier = eddsa.new(self.id_key_public, 'rfc8032')
+            verifier = eddsa.new(id_key_public, 'rfc8032')
 
             try:
-                verifier.verify(SHA512.new(self.spk_key_public.export_key(format='DER')), self.sig_spk)
-                verifier.verify(SHA512.new(self.pqspk_pkey), self.sig_pqspk)
-                verifier.verify(SHA512.new(self.pqopk_pkey), self.sig_pqopk)
+                verifier.verify(SHA512.new(spk_key_public.export_key(format='DER')), sig_spk)
+                verifier.verify(SHA512.new(pqspk_pkey), sig_pqspk)
+                verifier.verify(SHA512.new(pqopk_pkey), sig_pqopk)
                 
             except ValueError:
                 print("Key from server are not authentic!")
@@ -457,22 +485,111 @@ class Client:
                 self.ep_key_public = ep_key.public_key()
                 self.ep_key_private = ep_key
 
-                ct_a, ss_a = Kyber1024.enc(self.pqopk_pkey)
+                ct_a, ss_a = Kyber1024.enc(pqopk_pkey)
 
-                dh_1 = key_agreement(static_priv=self.id_key_private, static_pub=self.spk_key_public, kdf=self.kdf)
-                dh_2 = key_agreement(static_priv=self.ep_key_private, static_pub=self.id_key_public, kdf=self.kdf)
-                dh_3 = key_agreement(static_priv=self.ep_key_private, static_pub=self.spk_key_public, kdf=self.kdf)
-                dh_4 = key_agreement(static_priv=self.ep_key_private, static_pub=self.opk_key_public, kdf=self.kdf)
+                dh_1 = key_agreement(static_priv=self.id_key_private, static_pub=spk_key_public, kdf=self.kdf)
+                dh_2 = key_agreement(static_priv=self.ep_key_private, static_pub=id_key_public, kdf=self.kdf)
+                dh_3 = key_agreement(static_priv=self.ep_key_private, static_pub=spk_key_public, kdf=self.kdf)
+                dh_4 = key_agreement(static_priv=self.ep_key_private, static_pub=opk_key_public, kdf=self.kdf)
 
                 self.secret_key = self.kdf(dh_1 + dh_2 + dh_3 + dh_4 + ss_a)
 
+                # need to del all dh, ss vals
+
                 self.header = self.id_key_public.export_key(format='DER')
 
-        else:
-            print("OK")
-            #for user in user_in_session:
-            #    pass
+                ct_a = b64encode(ct_a).decode('utf-8')
+                self.sock.send(ct_a.encode('utf-8'))
+                time.sleep(0.05)
 
+                self.ep_key_public = ep_key.public_key().export_key(format='PEM')
+                self.sock.send(self.ep_key_public.encode('utf-8'))
+
+                try:
+                    self.ask_userMsg_win.destroy()
+                    gui_thread = threading.Thread(target=self.message_gui)
+                    receive_thread = threading.Thread(target=self.receive)
+
+                    gui_thread.start()
+                    receive_thread.start()
+
+                    gui_thread.join()
+                    receive_thread.join()
+                except Exception as e:
+                    print(e)
+                    pass
+
+        elif pqxdh_mode == "DEC":
+            id_key_public = ECC.import_key(self.sock.recv(1024).decode('utf-8'))
+
+            pqid_pkey = self.sock.recv(30720).decode('utf-8')
+            pqid_pkey = b64decode(pqid_pkey)
+
+            spk_key_public = ECC.import_key(self.sock.recv(1024).decode('utf-8'))
+
+            sig_spk = self.sock.recv(20480).decode('utf-8')
+            sig_spk = b64decode(sig_spk)
+
+            pqspk_pkey = self.sock.recv(30720).decode('utf-8')
+            pqspk_pkey = b64decode(pqspk_pkey)
+
+            sig_pqspk = self.sock.recv(20480).decode('utf-8')
+            sig_pqspk = b64decode(sig_pqspk)
+
+            opk_key_public = ECC.import_key(self.sock.recv(1024).decode('utf-8'))
+
+            pqopk_pkey = self.sock.recv(30720).decode('utf-8')
+            pqopk_pkey = b64decode(pqopk_pkey)
+
+            sig_pqopk = self.sock.recv(20480).decode('utf-8')
+            sig_pqopk = b64decode(sig_pqopk)
+
+            ep_key_public = ECC.import_key(self.sock.recv(1024).decode('utf-8'))
+
+            ct_a = self.sock.recv(30720).decode('utf-8')
+            ct_a = b64decode(ct_a)
+
+            # verify keys sent from server
+            verifier = eddsa.new(id_key_public, 'rfc8032')
+
+            try:
+                verifier.verify(SHA512.new(spk_key_public.export_key(format='DER')), sig_spk)
+                verifier.verify(SHA512.new(pqspk_pkey), sig_pqspk)
+                verifier.verify(SHA512.new(pqopk_pkey), sig_pqopk)
+                
+            except ValueError:
+                print("Key from server are not authentic!")
+            else:
+                print("Key from server are authentic!")
+
+                ep_key = ECC.generate(curve='ed25519')
+                self.ep_key_public = ep_key.public_key()
+                self.ep_key_private = ep_key
+
+                pt = Kyber1024.dec(ct_a, self.pqopk_skey)
+
+                dh_1 = key_agreement(static_priv=self.spk_key_private, static_pub=id_key_public, kdf=self.kdf)
+                dh_2 = key_agreement(static_priv=self.id_key_private, static_pub=ep_key_public, kdf=self.kdf)
+                dh_3 = key_agreement(static_priv=self.spk_key_private, static_pub=ep_key_public, kdf=self.kdf)
+                dh_4 = key_agreement(static_priv=self.opk_key_private, static_pub=ep_key_public, kdf=self.kdf)
+
+                self.secret_key = self.kdf(dh_1 + dh_2 + dh_3 + dh_4 + pt)
+
+                # need to del all dh, ss vals
+
+                self.header = self.id_key_public.export_key(format='DER')
+
+                gui_thread = threading.Thread(target=self.message_gui)
+                receive_thread = threading.Thread(target=self.receive)
+
+                gui_thread.start()
+                receive_thread.start()
+
+                gui_thread.join()
+                receive_thread.join()
+        else:
+            messagebox.showerror(title="Error", message="No user found!")
+        
 
     # * This function is to ask users whether to login or register
     def login_or_register_gui(self):
@@ -593,6 +710,35 @@ class Client:
         #register_thread = threading.Thread(target=self.register)
         #register_thread.start()
 
+    def ask_userMsg_gui(self):
+        #self.sock.send("login".encode('utf-8'))
+
+        self.ask_userMsg_win = tk.Tk()
+        self.ask_userMsg_win.title("Set Message Receiver")
+        self.ask_userMsg_win.configure(bg="lightgreen")
+
+        width = 600
+        height = 400
+        screenwidth = self.ask_userMsg_win.winfo_screenwidth()
+        screenheight = self.ask_userMsg_win.winfo_screenheight()
+        alignstr = '%dx%d+%d+%d' % (width, height, (screenwidth - width) / 2, (screenheight - height) / 2)
+        self.ask_userMsg_win.geometry(alignstr)
+
+        username_label = tk.Label(self.ask_userMsg_win, text="Username to message to : ", bg="lightgreen")
+        username_label.config(font=("Arial", 12))
+        username_label.pack(padx=20, pady=5)
+
+        self.username_input = tk.Text(self.ask_userMsg_win, height=3)
+        self.username_input.pack(padx=20, pady=5)
+
+        send_button = tk.Button(self.ask_userMsg_win, text="Exchange Message", command=self.calc_pqxdh)
+        send_button.config(font=("Arial", 12))
+        send_button.pack(padx=20, pady=5)
+
+        self.ask_userMsg_win.protocol("WM_DELETE_WINDOW", self.stop_askuserMsg)
+
+        self.ask_userMsg_win.mainloop()
+
     # * This function is to get input from login_gui funct and send to
     # * server for verification
     # ? After login, this function will goto message_gui
@@ -607,31 +753,28 @@ class Client:
 
         # initial KEP and encryption on login data
         # ? encrypted data will be sent on encrypt()
-        session_key = self.init_ecdh()
-        self.init_encrypt(session_key, login_data)
+        self.init_ecdh()
+        self.init_encrypt(login_data)
 
         # Wait for server response
-        login_response = self.init_decrypt(session_key)
+        login_response = self.init_decrypt()
 
         # if login success, goto message_gui
         if login_response == "LOGIN_SUCCESS":
             self.login_win.destroy()
 
             self.init_pqxdh("login", password)
-            self.calc_pqxdh(session_key)
+            #self.calc_pqxdh()
 
             self.nickname = username
             self.gui_done = False
             self.running = True
 
-            gui_thread = threading.Thread(target=self.message_gui)
-            receive_thread = threading.Thread(target=self.receive)
+            self.ask_userMsg_gui()
 
-            gui_thread.start()
-            receive_thread.start()
+            #self.ask_userMsg_win.destroy()
 
-            gui_thread.join()
-            receive_thread.join()
+            
 
         # if login dupe, abort login
         elif login_response == "LOGIN_DUPE":
@@ -674,15 +817,15 @@ class Client:
             
             # initial KEP and encryption on login data
             # ? encrypted data will be sent on encrypt()
-            session_key = self.init_ecdh()
-            self.init_encrypt(session_key, register_data)
+            self.init_ecdh()
+            self.init_encrypt(register_data)
 
             # Wait for server response
-            register_response = self.init_decrypt(session_key)
+            register_response = self.init_decrypt()
 
             if register_response == "REGISTER_SUCCESS":
-                self.init_pqxdh(state="register", pwd=self.password)
-                self.calc_pqxdh(session_key)
+                self.init_pqxdh(state="register", pwd=password)
+                #self.calc_pqxdh()
                 messagebox.showinfo(title="Info", message="Registration complete. Please log in using your username and password.")
                 
                 # ! same handle case as login, close and re-init conn after exit win
@@ -704,6 +847,7 @@ class Client:
     # * This function is to get input from user message and display message
     # * from other users
     def message_gui(self):
+        #self.ask_userMsg_win.destroy()
         self.win = tk.Tk()
         self.win.title("Message")
         self.win.configure(bg="lightgreen")
@@ -768,6 +912,12 @@ class Client:
     def stop_register(self):
         self.running = False
         self.register_win.destroy()
+        self.sock.close()
+        os._exit(0)
+
+    def stop_askuserMsg(self):
+        self.running = False
+        self.ask_userMsg_win.destroy()
         self.sock.close()
         os._exit(0)
 

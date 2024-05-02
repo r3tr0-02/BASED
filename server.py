@@ -127,7 +127,9 @@ cursor.execute('''
         sig_pqspk TEXT,
         opk_key_public TEXT, opk_key_private TEXT,
         pqopk_pkey TEXT, pqopk_skey TEXT,
-        sig_pqopk TEXT
+        sig_pqopk TEXT,
+        ep_key_public TEXT,
+        pq_ct TEXT
     );
 ''')
 conn.commit()
@@ -366,39 +368,98 @@ def retrieve_user_keys(client, user_id):
 
 # * This function is to retrieve all pubkeys, sigs of users in server session,
 # ? This function send all keys and sigs of connected clients to client
-def retrieve_user_keys_sigs(client, session_key, nicknames):
-    if len(nicknames) <= 1:
-        init_encrypt(client, session_key, "SELF_CALC")
-    else:
-        init_encrypt(client, session_key, str(len(nicknames)))
-        for nickname in nicknames:
-            cursor.execute('SELECT id FROM users WHERE username = ?', (nickname, ))
+def retrieve_user_keys_sigs(client, session_key, nicknames, username):
+
+    askUser = init_decrypt(client, session_key)
+    askUser = askUser.decode()
+
+    cursor.execute('SELECT id FROM users WHERE username = ?', (askUser, ))
+    user_id = cursor.fetchone()
+
+    print(nicknames)
+
+    if user_id:
+        user_id = user_id[0]
+
+        if askUser not in nicknames:
+            init_encrypt(client, session_key, "ENC")
+
+            cursor.execute('''SELECT id_key_public, pqid_pkey, spk_key_public, sig_spk,
+                    pqspk_pkey, sig_pqspk, opk_key_public, pqopk_pkey, sig_pqopk
+                    FROM keys WHERE user_id = ?''', (user_id, ))
+            keys = cursor.fetchone()
+
+            client.send(keys[0].encode('utf-8'))
+            time.sleep(0.05)
+            client.send(keys[1].encode('utf-8'))
+            time.sleep(0.05)
+            client.send(keys[2].encode('utf-8'))
+            time.sleep(0.05)
+            client.send(keys[3].encode('utf-8'))
+            time.sleep(0.05)
+            client.send(keys[4].encode('utf-8'))
+            time.sleep(0.05)
+            client.send(keys[5].encode('utf-8'))
+            time.sleep(0.05)
+            client.send(keys[6].encode('utf-8'))
+            time.sleep(0.05)
+            client.send(keys[7].encode('utf-8'))
+            time.sleep(0.05)
+            client.send(keys[8].encode('utf-8'))
+
+            ct_a = client.recv(30720).decode('utf-8')
+            ep_key_public = client.recv(1024).decode('utf-8')
+
+            cursor.execute('''SELECT id FROM users WHERE username = ?''', (username, ))
             user_id = cursor.fetchone()
+            user_id = user_id[0]
 
-            print(user_id[0])
+            cursor.execute('UPDATE keys SET ep_key_public = ?, pq_ct = ? WHERE user_id = ?;', (ep_key_public, ct_a, user_id, ))
+            conn.commit()
 
-            # cursor.commit('''SELECT id_key_public, pqid_pkey, spk_key_public, sig_spk,
-            #                 pqspk_pkey, sig_pqspk, opk_key_public, pqopk_pkey, sig_pqopk
-            #                 FROM keys WHERE user_id = ?''', (user_id, ))
-            # keys = cursor.fetchone
+        else:
+            init_encrypt(client, session_key, "DEC")
 
-            # client.send(keys[1].encode('utf-8'))
-            # time.sleep(0.05)
-            # client.send(keys[2].encode('utf-8'))
-            # time.sleep(0.05)
-            # client.send(keys[3].encode('utf-8'))
-            # time.sleep(0.05)
-            # client.send(keys[4].encode('utf-8'))
-            # time.sleep(0.05)
-            # client.send(keys[5].encode('utf-8'))
-            # time.sleep(0.05)
-            # client.send(keys[6].encode('utf-8'))
-            # time.sleep(0.05)
-            # client.send(keys[7].encode('utf-8'))
-            # time.sleep(0.05)
-            # client.send(keys[8].encode('utf-8'))
-            # time.sleep(0.05)
-            # client.send(keys[9].encode('utf-8'))
+            cursor.execute('''SELECT id_key_public, pqid_pkey, spk_key_public, sig_spk,
+                    pqspk_pkey, sig_pqspk, opk_key_public, pqopk_pkey, sig_pqopk, ep_key_public, pq_ct
+                    FROM keys WHERE user_id = ?''', (user_id, ))
+            keys = cursor.fetchone()
+
+            client.send(keys[0].encode('utf-8'))
+            time.sleep(0.05)
+            client.send(keys[1].encode('utf-8'))
+            time.sleep(0.05)
+            client.send(keys[2].encode('utf-8'))
+            time.sleep(0.05)
+            client.send(keys[3].encode('utf-8'))
+            time.sleep(0.05)
+            client.send(keys[4].encode('utf-8'))
+            time.sleep(0.05)
+            client.send(keys[5].encode('utf-8'))
+            time.sleep(0.05)
+            client.send(keys[6].encode('utf-8'))
+            time.sleep(0.05)
+            client.send(keys[7].encode('utf-8'))
+            time.sleep(0.05)
+            client.send(keys[8].encode('utf-8'))
+            time.sleep(0.05)
+            client.send(keys[9].encode('utf-8'))
+            time.sleep(0.05)
+            client.send(keys[10].encode('utf-8'))
+            time.sleep(0.05)
+            client.send(keys[10].encode('utf-8'))
+    else:
+        init_encrypt(client, session_key, "NO USER")
+            
+
+    #if len(nicknames) <= 1:
+    #    init_encrypt(client, session_key, "SELF_CALC")
+    #else:
+    #    init_encrypt(client, session_key, str(len(nicknames)))
+    #for nickname in nicknames:
+    
+
+    #print(user_id[0])
 
 # * This function is to generate a random 16-byte salt for pass hash
 def generate_salt():
@@ -494,15 +555,15 @@ def receive():
                             init_encrypt(client, session_key, "LOGIN_SUCCESS")
                             #client.send("LOGIN_SUCCESS".encode('utf-8'))
 
-                            # ? Send all user keys from db to client
+                            # ? Send all user keys from db to client - init_pqxdh()
                             retrieve_user_keys(client, user_data[0])
 
                             # Set the username as the nickname
                             nicknames.append(username)
-
                             clients.append(client)
 
-                            retrieve_user_keys_sigs(client, session_key, nicknames)
+                            # ? Send corresponder keys from db to client - askUserMsg() -> calc_pqxdh()
+                            retrieve_user_keys_sigs(client, session_key, nicknames, username)
 
                             print(f"Nickname of the client is {username}")
                             broadcast(f"{username} connected to the server!\n".encode('utf-8'))
