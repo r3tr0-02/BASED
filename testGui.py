@@ -97,11 +97,14 @@ client = Client(HOST, PORT)
 # // TODO : start init. encrypt on register on conn
 # // TODO : polish retry login after fail - some uncaught exception / logic err
 # // TODO : clean up encryption method in separate funct
-# TODO : start init. pqxdh key gen
+# // TODO : start init. pqxdh key gen
 # TODO : start calc pqxdh sk - get current clients in session, then update SK each time?
 # TODO : research on how to do clients > 2 ?
     # TODO : resort to askMsguser? 
-# TODO : research on what happen if client exit?
+# TODO : research on what happen if client exit
+    # // TODO : fix memleak on exit - gui_thread, recv_thread
+# // TODO : polish on message exit - both client shut
+# // TODO : look into pqid sign-verify on both ends
 # // TODO : except handling on exit (init ecdh-encrypt)
 # // TODO : polish login-retrieve key (encrypt curve skeys)
 # // TODO : how to encrypt and handle priv keys in db? 
@@ -133,17 +136,21 @@ from Crypto.Signature import eddsa
 from kyber import Kyber1024
 from pqc.sign import dilithium5
 
-HOST = '127.0.0.1'
+HOST = '172.17.90.77'
 PORT = 9090
 
 class Client:
 
     def __init__(self, host, port):
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.sock.connect((host, port))
 
-        self.user_keygen()
-        self.login_or_register_gui()
+        try:
+            self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.sock.connect((host, port))
+        except ConnectionRefusedError:
+            messagebox.showinfo(title="Info", message="BASED Server is not up and running! It may be down and you may check later.")
+        else:
+            self.user_keygen()
+            self.login_or_register_gui()
 
     # * This function is to generate an ECC ed25519 keypair for client
     # ? client keypairs are all stored in memory
@@ -182,9 +189,10 @@ class Client:
         cipher = AES.new(self.session_key, AES.MODE_CBC)
         data = cipher.encrypt(pad(data.encode('utf-8'), AES.block_size))
 
-        self.sock.send(data)
-        time.sleep(0.05)
-        self.sock.send(cipher.iv)
+        json_k = ['iv', 'data']
+        json_v = [b64encode(x).decode('utf-8') for x in (cipher.iv, data)]
+        json_ct = json.dumps(dict(zip(json_k, json_v)))
+        self.sock.send(json_ct.encode('utf-8'))
 
     # * This function is to perform message encryption using AEAD scheme
     # * - This function will also perform message signing with Dilithium
@@ -220,13 +228,14 @@ class Client:
             pt = cipher.decrypt_and_verify(json_v['ct'], json_v['tag'])
             pt = pt.decode('utf-8')
 
-            msg_verify = self.verify_msg(self.pqid_pkey, pt, json_v['msg_sig'])
+            msg_verify = self.verify_msg(pt, json_v['msg_sig'])
 
             # concat verification indication with message
             return pt + msg_verify
 
-        except Exception as e:
-            pass
+        except Exception as e:      # ? decryption failed - pt from server on client disconn.
+            #print(e)
+            return data
 
     # * This function is to perform message signing
     # ? This function will return msg_sig called to init_encrypt_aead()
@@ -236,27 +245,42 @@ class Client:
     # * This function is to perform message verification
     # ? This function will return str OK on successful verify
     # ? or str NOT OK on failed verify
-    def verify_msg(self, pqid_pkey, pt, msg_sig):
+    def verify_msg(self, pt, msg_sig):
+
+        # verify message using own pqid_pkey
         try:
-            dilithium5.verify(msg_sig, SHA512.new(pt.encode('utf-8')).digest(), pqid_pkey)
+            dilithium5.verify(msg_sig, SHA512.new(pt.encode('utf-8')).digest(), self.pqid_pkey)
             return " - OK"
         except ValueError:
-            return "  - NOT OK"
+
+            # if raise except, msg from corresp. ; try verify using corresp. pqid_pkey
+            try:
+                dilithium5.verify(msg_sig, SHA512.new(pt.encode('utf-8')).digest(), self.corresp_pqid_pkey)
+                return " - OK"
+            except ValueError:      # ! if somehow fails to verify, return not ok
+                return " - NOT OK"
 
     # * This function is to perform initial decryption of server response
     # ? This function will return decrypted server response
     def init_decrypt(self):
-        data = self.sock.recv(1024)
-        iv = self.sock.recv(1024)
+        try:
+            data = self.sock.recv(20480).decode('utf-8')
 
-        cipher = AES.new(self.session_key, AES.MODE_CBC, iv)
-        data = unpad(cipher.decrypt(data), AES.block_size)
+            b64 = json.loads(data)
+            json_k = [ 'iv', 'data' ]
+            json_v = {k:b64decode(b64[k]) for k in json_k}
 
-        return data.decode('utf-8')
+            cipher = AES.new(self.session_key, AES.MODE_CBC, json_v['iv'])
+            data = unpad(cipher.decrypt(json_v['data']), AES.block_size)
+
+            return data.decode('utf-8')
+
+        except Exception as e:
+            pass
 
     # * This function is to perform initial PQXDH key generation and 
     # * management on client-server
-    # ? If login, retrieve user keys from server and set session with keys
+    # ? If login, retrieve user keys from server and set session with own keys
     # ? If register, generate and upload keys and sigs to server
     def init_pqxdh(self, state, pwd):
 
@@ -407,189 +431,226 @@ class Client:
             # Publish keys to server
             # ! may need to work out better way to send keys...
             self.sock.send(id_key_public.encode('utf-8'))
+            time.sleep(0.05)
             self.sock.send(id_key_private.encode('utf-8'))
             time.sleep(0.05)
             self.sock.send(pqid_pkey.encode('utf-8'))
+            time.sleep(0.05)
             self.sock.send(pqid_skey.encode('utf-8'))
             time.sleep(0.05)
             self.sock.send(spk_key_public.encode('utf-8'))
+            time.sleep(0.05)
             self.sock.send(spk_key_private.encode('utf-8'))
             time.sleep(0.05)
             self.sock.send(str(sig_spk).encode('utf-8'))
             time.sleep(0.05)
             self.sock.send(pqspk_pkey.encode('utf-8'))
+            time.sleep(0.05)
             self.sock.send(pqspk_skey.encode('utf-8'))
             time.sleep(0.05)
             self.sock.send(str(sig_pqspk).encode('utf-8'))
             time.sleep(0.05)
             self.sock.send(opk_key_public.encode('utf-8'))
+            time.sleep(0.05)
             self.sock.send(opk_key_private.encode('utf-8'))
             time.sleep(0.05)
             self.sock.send(pqopk_pkey.encode('utf-8'))
+            time.sleep(0.05)
             self.sock.send(pqopk_skey.encode('utf-8'))
             time.sleep(0.05)
             self.sock.send(str(sig_pqopk).encode('utf-8'))
 
-    # * This function is to perform retrieve PQXDH keys from other users 
-    # * and perform calculation of secret key from all keypairs
-    # ? If only one user in session, self-calc SK
-    # ? If > one user in session, retrieve all pubkeys, sigs 
-    # ? and perform calc SK
+    # * This function is to perform retrieve PQXDH keys from corresponding users 
+    # * and perform calculation of secret key from both keypairs
+    # ! ---
+    # ? Get corresp. user keys, sigs
+    # ? and perf. ENC or DEC
     def calc_pqxdh(self):
         askUser = self.username_input.get('1.0', 'end-1c')
-        askUser = f'{askUser}'
 
-        self.init_encrypt(askUser)
+        if askUser == self.nickname:
+            messagebox.showerror(title="Error", message="You cannot message yourself (for now)!")
+        else:
+            askUser = f'{askUser}'
 
-        pqxdh_mode = self.init_decrypt()
+            self.init_encrypt(askUser)
 
-        if pqxdh_mode == "ENC":
-            id_key_public = ECC.import_key(self.sock.recv(1024).decode('utf-8'))
+            # Get pqxdh mode from server resp.
+            pqxdh_mode = self.init_decrypt()
 
-            pqid_pkey = self.sock.recv(30720).decode('utf-8')
-            pqid_pkey = b64decode(pqid_pkey)
+            # if corresp. user is not logged in, perform ENC
+            if pqxdh_mode == "ENC":
+                id_key_public = ECC.import_key(self.sock.recv(1024).decode('utf-8'))
 
-            spk_key_public = ECC.import_key(self.sock.recv(1024).decode('utf-8'))
+                self.corresp_pqid_pkey = self.sock.recv(30720).decode('utf-8')
+                self.corresp_pqid_pkey = b64decode(self.corresp_pqid_pkey)
 
-            sig_spk = self.sock.recv(20480).decode('utf-8')
-            sig_spk = b64decode(sig_spk)
+                spk_key_public = ECC.import_key(self.sock.recv(1024).decode('utf-8'))
 
-            pqspk_pkey = self.sock.recv(30720).decode('utf-8')
-            pqspk_pkey = b64decode(pqspk_pkey)
+                sig_spk = self.sock.recv(20480).decode('utf-8')
+                sig_spk = b64decode(sig_spk)
 
-            sig_pqspk = self.sock.recv(20480).decode('utf-8')
-            sig_pqspk = b64decode(sig_pqspk)
+                pqspk_pkey = self.sock.recv(30720).decode('utf-8')
+                pqspk_pkey = b64decode(pqspk_pkey)
 
-            opk_key_public = ECC.import_key(self.sock.recv(1024).decode('utf-8'))
+                sig_pqspk = self.sock.recv(20480).decode('utf-8')
+                sig_pqspk = b64decode(sig_pqspk)
 
-            pqopk_pkey = self.sock.recv(30720).decode('utf-8')
-            pqopk_pkey = b64decode(pqopk_pkey)
+                opk_key_public = ECC.import_key(self.sock.recv(1024).decode('utf-8'))
 
-            sig_pqopk = self.sock.recv(20480).decode('utf-8')
-            sig_pqopk = b64decode(sig_pqopk)
+                pqopk_pkey = self.sock.recv(30720).decode('utf-8')
+                pqopk_pkey = b64decode(pqopk_pkey)
 
-            # verify keys sent from server
-            verifier = eddsa.new(id_key_public, 'rfc8032')
+                sig_pqopk = self.sock.recv(20480).decode('utf-8')
+                sig_pqopk = b64decode(sig_pqopk)
 
-            try:
-                verifier.verify(SHA512.new(spk_key_public.export_key(format='DER')), sig_spk)
-                verifier.verify(SHA512.new(pqspk_pkey), sig_pqspk)
-                verifier.verify(SHA512.new(pqopk_pkey), sig_pqopk)
-                
-            except ValueError:
-                print("Key from server are not authentic!")
-            else:
-                print("Key from server are authentic!")
-
-                ep_key = ECC.generate(curve='ed25519')
-                self.ep_key_public = ep_key.public_key()
-                self.ep_key_private = ep_key
-
-                ct_a, ss_a = Kyber1024.enc(pqopk_pkey)
-
-                dh_1 = key_agreement(static_priv=self.id_key_private, static_pub=spk_key_public, kdf=self.kdf)
-                dh_2 = key_agreement(static_priv=self.ep_key_private, static_pub=id_key_public, kdf=self.kdf)
-                dh_3 = key_agreement(static_priv=self.ep_key_private, static_pub=spk_key_public, kdf=self.kdf)
-                dh_4 = key_agreement(static_priv=self.ep_key_private, static_pub=opk_key_public, kdf=self.kdf)
-
-                self.secret_key = self.kdf(dh_1 + dh_2 + dh_3 + dh_4 + ss_a)
-
-                # need to del all dh, ss vals
-
-                self.header = self.id_key_public.export_key(format='DER')
-
-                ct_a = b64encode(ct_a).decode('utf-8')
-                self.sock.send(ct_a.encode('utf-8'))
-                time.sleep(0.05)
-
-                self.ep_key_public = ep_key.public_key().export_key(format='PEM')
-                self.sock.send(self.ep_key_public.encode('utf-8'))
+                # verify keys sent from server
+                verifier = eddsa.new(id_key_public, 'rfc8032')
 
                 try:
-                    self.ask_userMsg_win.destroy()
-                    gui_thread = threading.Thread(target=self.message_gui)
-                    receive_thread = threading.Thread(target=self.receive)
-
-                    gui_thread.start()
-                    receive_thread.start()
-
-                    gui_thread.join()
-                    receive_thread.join()
-                except Exception as e:
-                    print(e)
+                    verifier.verify(SHA512.new(spk_key_public.export_key(format='DER')), sig_spk)
+                    verifier.verify(SHA512.new(pqspk_pkey), sig_pqspk)
+                    verifier.verify(SHA512.new(pqopk_pkey), sig_pqopk)
+                    
+                except ValueError:
                     pass
 
-        elif pqxdh_mode == "DEC":
-            id_key_public = ECC.import_key(self.sock.recv(1024).decode('utf-8'))
+                else:
+                    ep_key = ECC.generate(curve='ed25519')
+                    self.ep_key_public = ep_key.public_key()
+                    self.ep_key_private = ep_key
 
-            pqid_pkey = self.sock.recv(30720).decode('utf-8')
-            pqid_pkey = b64decode(pqid_pkey)
+                    ct_a, ss_a = Kyber1024.enc(pqopk_pkey)
 
-            spk_key_public = ECC.import_key(self.sock.recv(1024).decode('utf-8'))
+                    dh_1 = key_agreement(static_priv=self.id_key_private, static_pub=spk_key_public, kdf=self.kdf)
+                    dh_2 = key_agreement(static_priv=self.ep_key_private, static_pub=id_key_public, kdf=self.kdf)
+                    dh_3 = key_agreement(static_priv=self.ep_key_private, static_pub=spk_key_public, kdf=self.kdf)
+                    dh_4 = key_agreement(static_priv=self.ep_key_private, static_pub=opk_key_public, kdf=self.kdf)
 
-            sig_spk = self.sock.recv(20480).decode('utf-8')
-            sig_spk = b64decode(sig_spk)
+                    self.secret_key = self.kdf(dh_1 + dh_2 + dh_3 + dh_4 + ss_a)
 
-            pqspk_pkey = self.sock.recv(30720).decode('utf-8')
-            pqspk_pkey = b64decode(pqspk_pkey)
+                    # ! need to del all dh, ss vals
 
-            sig_pqspk = self.sock.recv(20480).decode('utf-8')
-            sig_pqspk = b64decode(sig_pqspk)
+                    ss_a = b''
+                    dh_1 = ""
+                    dh_2 = ""
+                    dh_3 = ""
+                    dh_4 = ""
 
-            opk_key_public = ECC.import_key(self.sock.recv(1024).decode('utf-8'))
+                    self.header = self.id_key_public.export_key(format='DER')
 
-            pqopk_pkey = self.sock.recv(30720).decode('utf-8')
-            pqopk_pkey = b64decode(pqopk_pkey)
+                    # upload ct and ep_key_public to server
+                    # ? to be fetched by corresp. , performing DEC
+                    ct_a = b64encode(ct_a).decode('utf-8')
+                    self.sock.send(ct_a.encode('utf-8'))
+                    time.sleep(0.05)
 
-            sig_pqopk = self.sock.recv(20480).decode('utf-8')
-            sig_pqopk = b64decode(sig_pqopk)
+                    self.ep_key_public = ep_key.public_key().export_key(format='PEM')
+                    self.sock.send(self.ep_key_public.encode('utf-8'))
 
-            ep_key_public = ECC.import_key(self.sock.recv(1024).decode('utf-8'))
+                    # start message after successful set secret_key
+                    try:
+                        self.ask_userMsg_win.destroy()
+                        gui_thread = threading.Thread(target=self.message_gui)
+                        receive_thread = threading.Thread(target=self.receive)
 
-            ct_a = self.sock.recv(30720).decode('utf-8')
-            ct_a = b64decode(ct_a)
+                        gui_thread.daemon = True
+                        receive_thread.daemon = True
 
-            # verify keys sent from server
-            verifier = eddsa.new(id_key_public, 'rfc8032')
+                        gui_thread.start()
+                        receive_thread.start()
 
-            try:
-                verifier.verify(SHA512.new(spk_key_public.export_key(format='DER')), sig_spk)
-                verifier.verify(SHA512.new(pqspk_pkey), sig_pqspk)
-                verifier.verify(SHA512.new(pqopk_pkey), sig_pqopk)
+                        gui_thread.join()
+                        receive_thread.join()
+
+                    except Exception as e:
+                        print(e)
+                        pass
+
+            elif pqxdh_mode == "DEC":
+                id_key_public = ECC.import_key(self.sock.recv(1024).decode('utf-8'))
+
+                self.corresp_pqid_pkey = self.sock.recv(30720).decode('utf-8')
+                self.corresp_pqid_pkey = b64decode(self.corresp_pqid_pkey)
+
+                spk_key_public = ECC.import_key(self.sock.recv(1024).decode('utf-8'))
+
+                sig_spk = self.sock.recv(20480).decode('utf-8')
+                sig_spk = b64decode(sig_spk)
+
+                pqspk_pkey = self.sock.recv(30720).decode('utf-8')
+                pqspk_pkey = b64decode(pqspk_pkey)
+
+                sig_pqspk = self.sock.recv(20480).decode('utf-8')
+                sig_pqspk = b64decode(sig_pqspk)
+
+                opk_key_public = ECC.import_key(self.sock.recv(1024).decode('utf-8'))
+
+                pqopk_pkey = self.sock.recv(30720).decode('utf-8')
+                pqopk_pkey = b64decode(pqopk_pkey)
+
+                sig_pqopk = self.sock.recv(20480).decode('utf-8')
+                sig_pqopk = b64decode(sig_pqopk)
+
+                ep_key_public = ECC.import_key(self.sock.recv(1024).decode('utf-8'))
+
+                ct_a = self.sock.recv(30720).decode('utf-8')
+                ct_a = b64decode(ct_a)
+
+                # verify keys sent from server
+                verifier = eddsa.new(id_key_public, 'rfc8032')
+
+                try:
+                    verifier.verify(SHA512.new(spk_key_public.export_key(format='DER')), sig_spk)
+                    verifier.verify(SHA512.new(pqspk_pkey), sig_pqspk)
+                    verifier.verify(SHA512.new(pqopk_pkey), sig_pqopk)
+                    
+                except ValueError:
+                    pass
                 
-            except ValueError:
-                print("Key from server are not authentic!")
+                else:
+                    ep_key = ECC.generate(curve='ed25519')
+                    self.ep_key_public = ep_key.public_key()
+                    self.ep_key_private = ep_key
+
+                    pt = Kyber1024.dec(ct_a, self.pqopk_skey)
+
+                    dh_1 = key_agreement(static_priv=self.spk_key_private, static_pub=id_key_public, kdf=self.kdf)
+                    dh_2 = key_agreement(static_priv=self.id_key_private, static_pub=ep_key_public, kdf=self.kdf)
+                    dh_3 = key_agreement(static_priv=self.spk_key_private, static_pub=ep_key_public, kdf=self.kdf)
+                    dh_4 = key_agreement(static_priv=self.opk_key_private, static_pub=ep_key_public, kdf=self.kdf)
+
+                    self.secret_key = self.kdf(dh_1 + dh_2 + dh_3 + dh_4 + pt)
+
+                    # ! need to del all dh, ss vals
+                    pt = b''
+                    dh_1 = ""
+                    dh_2 = ""
+                    dh_3 = ""
+                    dh_4 = ""
+
+                    self.header = self.id_key_public.export_key(format='DER')
+
+                    # start message after successful set secret_key
+                    try:
+                        self.ask_userMsg_win.destroy()
+                        gui_thread = threading.Thread(target=self.message_gui)
+                        receive_thread = threading.Thread(target=self.receive)
+
+                        gui_thread.daemon = True
+                        receive_thread.daemon = True
+
+                        gui_thread.start()
+                        receive_thread.start()
+
+                        gui_thread.join()
+                        receive_thread.join()
+
+                    except Exception as e:
+                        print(e)
+                        pass
             else:
-                print("Key from server are authentic!")
-
-                ep_key = ECC.generate(curve='ed25519')
-                self.ep_key_public = ep_key.public_key()
-                self.ep_key_private = ep_key
-
-                pt = Kyber1024.dec(ct_a, self.pqopk_skey)
-
-                dh_1 = key_agreement(static_priv=self.spk_key_private, static_pub=id_key_public, kdf=self.kdf)
-                dh_2 = key_agreement(static_priv=self.id_key_private, static_pub=ep_key_public, kdf=self.kdf)
-                dh_3 = key_agreement(static_priv=self.spk_key_private, static_pub=ep_key_public, kdf=self.kdf)
-                dh_4 = key_agreement(static_priv=self.opk_key_private, static_pub=ep_key_public, kdf=self.kdf)
-
-                self.secret_key = self.kdf(dh_1 + dh_2 + dh_3 + dh_4 + pt)
-
-                # need to del all dh, ss vals
-
-                self.header = self.id_key_public.export_key(format='DER')
-
-                gui_thread = threading.Thread(target=self.message_gui)
-                receive_thread = threading.Thread(target=self.receive)
-
-                gui_thread.start()
-                receive_thread.start()
-
-                gui_thread.join()
-                receive_thread.join()
-        else:
-            messagebox.showerror(title="Error", message="No user found!")
-        
+                messagebox.showerror(title="Error", message="No user found!")
 
     # * This function is to ask users whether to login or register
     def login_or_register_gui(self):
@@ -710,6 +771,11 @@ class Client:
         #register_thread = threading.Thread(target=self.register)
         #register_thread.start()
 
+    # * This function is to ask users for the corresponding user to exchange
+    # * message with
+    # ? The first user to initiate will be perf. pqxdh's enc
+    # ? While the other user will accept the initiate and perf. pqxdh's dec
+    # ! May need to revise meth. - cannot message yourself
     def ask_userMsg_gui(self):
         #self.sock.send("login".encode('utf-8'))
 
@@ -764,17 +830,12 @@ class Client:
             self.login_win.destroy()
 
             self.init_pqxdh("login", password)
-            #self.calc_pqxdh()
 
             self.nickname = username
             self.gui_done = False
             self.running = True
 
             self.ask_userMsg_gui()
-
-            #self.ask_userMsg_win.destroy()
-
-            
 
         # if login dupe, abort login
         elif login_response == "LOGIN_DUPE":
@@ -823,9 +884,10 @@ class Client:
             # Wait for server response
             register_response = self.init_decrypt()
 
+            print(register_response)
+
             if register_response == "REGISTER_SUCCESS":
                 self.init_pqxdh(state="register", pwd=password)
-                #self.calc_pqxdh()
                 messagebox.showinfo(title="Info", message="Registration complete. Please log in using your username and password.")
                 
                 # ! same handle case as login, close and re-init conn after exit win
@@ -889,7 +951,7 @@ class Client:
     def write(self):
         message = f"{self.nickname}: {self.input_area.get('1.0', 'end-1c')}"
 
-        # encrypt here
+        # attempt pqxdh_encrypt_aead here
         message = self.init_encrypt_aead(self.secret_key, message)
 
         self.sock.send(message.encode('utf-8'))
@@ -938,30 +1000,28 @@ class Client:
                 # decrypt here
                 message = self.sock.recv(30720).decode('utf-8')
 
-                if message == 'NICK':
-                    self.sock.send(self.nickname.encode('utf-8'))
+                try:
+                    # attempt pqxdh_aead_decrypt here
+                    message = self.init_decrypt_aead(self.secret_key, message)
+                except Exception as e:
+                    print(e)
+                    pass
 
-                # ! need to revisit this method in future 
-                # ! - ignore attempt on decrypt aead on server resp 
-                if "to the server" not in message:
-                    try:
-                        message = self.init_decrypt_aead(self.secret_key, message)
-                    except:
-                        pass
-
-                    if self.gui_done:
-                        self.text_area.config(state='normal')
-                        self.text_area.insert('end', message + "\n")
-                        self.text_area.yview('end')
-                        self.text_area.config(state='disabled')
-                    
+                if self.gui_done:
+                    self.text_area.config(state='normal')
+                    self.text_area.insert('end', message + "\n")
+                    self.text_area.yview('end')
+                    self.text_area.config(state='disabled')
+                
             except ConnectionAbortedError:
                 break
-            except:
-                #print(e)
+
+            # // ! need to look into why two clients crash here - 
+            # bug fixed - return type of init_enc_aead was none ; set to str
+            except Exception as e:
+                print(e)
                 print("Error")
                 self.stop()
-                #self.sock.close()
                 break
 
 client = Client(HOST, PORT)

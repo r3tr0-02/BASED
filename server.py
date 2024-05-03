@@ -64,10 +64,13 @@ receive()
 # // TODO : maybe except handling on register dupe users?
 # // TODO : except handling on exit (init ecdh-decrypt)
 # TODO : start calc pqxdh sk - send all keys for client in clients in session?, then update?
+# TODO : look into resetting opk, spk as defined in paper ; replenish from client
+# // TODO : look into resetting pq_ct, ep_key after fetch
 # // TODO : clean up encryption method in separate funct
 
 ### These libs are used for basic funct - network and threading
-import base64
+from base64 import b64encode, b64decode
+import json
 import time
 import socket
 import threading
@@ -88,7 +91,7 @@ from Crypto.Util.Padding import unpad, pad
 from kyber import Kyber1024
 from pqc.sign import dilithium5
 
-HOST = '127.0.0.1'
+HOST = '172.17.90.77'
 PORT = 9090
 
 server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -237,23 +240,32 @@ def init_encrypt(client, session_key, data):
     cipher = AES.new(session_key, AES.MODE_CBC)
     data = cipher.encrypt(pad(data.encode('utf-8'), AES.block_size))
 
-    client.send(data)
-    time.sleep(0.05)
-    client.send(cipher.iv)
+    json_k = ['iv', 'data']
+    json_v = [b64encode(x).decode('utf-8') for x in (cipher.iv, data)]
+    json_ct = json.dumps(dict(zip(json_k, json_v)))
+    client.send(json_ct.encode('utf-8'))
 
 # * This function is to perform initial decryption of user data
 # ? This function will return decrypted user data
 def init_decrypt(client, session_key):
-    # receive ct of login data from user and iv used during enc
-    login_data = client.recv(1024)
-    iv = client.recv(1024)
+    try:
+        # receive ct of login data from user and iv used during enc
+        login_data = client.recv(20480).decode('utf-8')
 
-    # init AES and attempt to decrypt ct using session_key
-    # decrypted ct will be unpad to return to pt
-    cipher = AES.new(session_key, AES.MODE_CBC, iv)
-    login_data = unpad(cipher.decrypt(login_data), AES.block_size)
+        b64 = json.loads(login_data)
+        json_k = [ 'iv', 'data' ]
+        json_v = {k:b64decode(b64[k]) for k in json_k}
+        
 
-    return login_data
+        # init AES and attempt to decrypt ct using session_key
+        # decrypted ct will be unpad to return to pt
+        cipher = AES.new(session_key, AES.MODE_CBC, json_v['iv'])
+        login_data = unpad(cipher.decrypt(json_v['data']), AES.block_size)
+
+        return login_data
+        
+    except Exception as e:
+        pass
 
 # * This function is to store user keys into database
 # ? No return for this function
@@ -264,46 +276,27 @@ def store_keys(client, username):
 
     id_key_public = client.recv(1024).decode('utf-8')
     id_key_private = client.recv(1024).decode('utf-8')
-
-    #print("ok 1")
     
     pqid_pkey = client.recv(30720).decode('utf-8')
     pqid_skey = client.recv(30720).decode('utf-8')
 
-    #print("ok 2")
-
     spk_key_public = client.recv(1024).decode('utf-8')
     spk_key_private = client.recv(1024).decode('utf-8')
 
-    #print("ok 3")
-
     sig_spk = client.recv(20480).decode('utf-8')
-
-    #print("ok 4")
 
     pqspk_pkey = client.recv(30720).decode('utf-8')
     pqspk_skey = client.recv(30720).decode('utf-8')
 
-    #print("ok 5")
-
     sig_pqspk = client.recv(20480).decode('utf-8')
-
-    #print("ok 6")
 
     opk_key_public = client.recv(1024).decode('utf-8')
     opk_key_private = client.recv(1024).decode('utf-8')
 
-    #print("ok 7")
-
     pqopk_pkey = client.recv(30720).decode('utf-8')
     pqopk_skey = client.recv(30720).decode('utf-8')
 
-    #print("ok 8")
-
     sig_pqopk = client.recv(20480).decode('utf-8')
-
-    #print("ok 9")
-    #print("ok in recv keys")
 
     # Insert new keys into the database
     # ? may need a better way of key mgmt...
@@ -331,8 +324,8 @@ def store_keys(client, username):
     conn.commit()
 
 # * This function is to retrieve user keys from database after successful login
-# ? This function will send all keys to client
-def retrieve_user_keys(client, user_id):
+# ? This function will send all keys belonging to client
+def resp_init_pqxdh(client, user_id):
     cursor.execute('SELECT * FROM keys WHERE user_id = ?;', (user_id,))
     keys = cursor.fetchone()
 
@@ -367,26 +360,28 @@ def retrieve_user_keys(client, user_id):
     client.send(keys[15].encode('utf-8'))
 
 # * This function is to retrieve all pubkeys, sigs of users in server session,
-# ? This function send all keys and sigs of connected clients to client
-def retrieve_user_keys_sigs(client, session_key, nicknames, username):
+# ! --
+# ? This function send all keys and sigs of corresponding clients to client
+def resp_calc_pqxdh(client, session_key, nicknames, username):
 
     askUser = init_decrypt(client, session_key)
     askUser = askUser.decode()
 
-    cursor.execute('SELECT id FROM users WHERE username = ?', (askUser, ))
+    # Look for corresp. user in db
+    cursor.execute('SELECT id FROM users WHERE username = ?;', (askUser, ))
     user_id = cursor.fetchone()
 
-    print(nicknames)
-
+    # if user exists, proceed to either ENC or DEC
     if user_id:
         user_id = user_id[0]
 
+        # if corresp. user is not logged in, perform ENC
         if askUser not in nicknames:
             init_encrypt(client, session_key, "ENC")
 
             cursor.execute('''SELECT id_key_public, pqid_pkey, spk_key_public, sig_spk,
                     pqspk_pkey, sig_pqspk, opk_key_public, pqopk_pkey, sig_pqopk
-                    FROM keys WHERE user_id = ?''', (user_id, ))
+                    FROM keys WHERE user_id = ?;''', (user_id, ))
             keys = cursor.fetchone()
 
             client.send(keys[0].encode('utf-8'))
@@ -417,6 +412,9 @@ def retrieve_user_keys_sigs(client, session_key, nicknames, username):
             cursor.execute('UPDATE keys SET ep_key_public = ?, pq_ct = ? WHERE user_id = ?;', (ep_key_public, ct_a, user_id, ))
             conn.commit()
 
+            return True
+        
+        # else if corresp. user is logged in, perform DEC
         else:
             init_encrypt(client, session_key, "DEC")
 
@@ -448,18 +446,16 @@ def retrieve_user_keys_sigs(client, session_key, nicknames, username):
             client.send(keys[10].encode('utf-8'))
             time.sleep(0.05)
             client.send(keys[10].encode('utf-8'))
+
+            cursor.execute('UPDATE keys SET ep_key_public = ?, pq_ct = ? WHERE user_id = ?;', ("", "", user_id, ))
+            conn.commit()
+
+            return True
+    
+    # if corresp. user not exist in db, return no user
     else:
         init_encrypt(client, session_key, "NO USER")
-            
-
-    #if len(nicknames) <= 1:
-    #    init_encrypt(client, session_key, "SELF_CALC")
-    #else:
-    #    init_encrypt(client, session_key, str(len(nicknames)))
-    #for nickname in nicknames:
-    
-
-    #print(user_id[0])
+        return False
 
 # * This function is to generate a random 16-byte salt for pass hash
 def generate_salt():
@@ -481,10 +477,6 @@ def handle(client):
         try:
             message = client.recv(30720)
             
-            # ! remove logging in server - based
-            #print(f"{nicknames[clients.index(client)]} says {message}")
-            
-
             # ? remove client from server list on exit
             # ! might need to revise method since user can malice type "LOG_OUT" lole
             if message.decode('utf-8') == "LOG_OUT":
@@ -515,112 +507,115 @@ def receive():
         print(f"Connected with {str(address)}!")
 
         # Ask for login or register
-        login_or_register = client.recv(1024).decode('utf-8')
+        try:
+            login_or_register = client.recv(1024).decode('utf-8')
 
-        # login option
-        if login_or_register.lower() == 'login':
-            try:
-                # initial KEP and decryption on login data
-                session_key = init_ecdh(client)
-                login_data = init_decrypt(client, session_key)
-
-                login_data = login_data.decode('utf-8').split()
-                username = login_data[0]
-                password = login_data[1]
-            except IndexError:
-                pass
-            except ValueError:  # ? for except handle ecdh
-                pass
-            else:
-                # ! prevent same acc login twice
-                if username in nicknames:
-                    init_encrypt(client, session_key, "LOGIN_DUPE")
-                    #client.send("LOGIN_DUPE".encode('utf-8'))
-                
-                # else account has not log in yet, proceed login
-                else:
-                    # Retrieve salt for the user
-                    cursor.execute('SELECT salt FROM users WHERE username = ?;', (username,))
-                    salt_data = cursor.fetchone()
-
-                    if salt_data:
-                        salt = salt_data[0]
-                        hashed_password = hash_password(password, salt)
-
-                        # Verify login credentials
-                        cursor.execute('SELECT id, username, password FROM users WHERE username = ? AND password = ?;', (username, hashed_password))
-                        user_data = cursor.fetchone()
-
-                        if user_data:
-                            init_encrypt(client, session_key, "LOGIN_SUCCESS")
-                            #client.send("LOGIN_SUCCESS".encode('utf-8'))
-
-                            # ? Send all user keys from db to client - init_pqxdh()
-                            retrieve_user_keys(client, user_data[0])
-
-                            # Set the username as the nickname
-                            nicknames.append(username)
-                            clients.append(client)
-
-                            # ? Send corresponder keys from db to client - askUserMsg() -> calc_pqxdh()
-                            retrieve_user_keys_sigs(client, session_key, nicknames, username)
-
-                            print(f"Nickname of the client is {username}")
-                            broadcast(f"{username} connected to the server!\n".encode('utf-8'))
-                            client.send("Connected to the server".encode('utf-8'))
-
-                            thread = threading.Thread(target=handle, args=(client,))
-                            thread.start()
-                        else:
-                            init_encrypt(client, session_key, "LOGIN_FAILED")
-                            #client.send("LOGIN_FAILED".encode('utf-8'))
-
-                    else:
-                        init_encrypt(client, session_key, "LOGIN_FAILED")
-                        #client.send("LOGIN_FAILED".encode('utf-8'))
-
-        # register option
-        elif login_or_register.lower() == 'register':
-            try:
-                session_key = init_ecdh(client)
-                register_data = init_decrypt(client, session_key)
-
-                register_data = register_data.decode('utf-8').split()
-                username = register_data[0]
-                password = register_data[1]
-            except IndexError:
-                pass
-            except ValueError:  # ? for except handle ecdh
-                pass
-            else:
-                # ! check if there are attempt on insert duplicate username
-                cursor.execute('SELECT id FROM users WHERE username = ?;', (username, ))
-                
-                # ? if username exist, abort register
-                if len(cursor.fetchall()) == 1:
-                    init_encrypt(client, session_key, "REGISTER_FAIL")
-                    #client.send("REGISTER_FAIL".encode('utf-8'))
-                
-                # ? else cont register with username
-                else:
-                    # Generate salt
-                    salt = generate_salt()
-
-                    # Hash password
-                    hashed_password = hash_password(password, salt)
-
-                    # Insert new user into the database
-                    cursor.execute('INSERT INTO users (username, password, salt) VALUES (?, ?, ?);', (username, hashed_password, salt))
-                    conn.commit()
-
-                    init_encrypt(client, session_key, "REGISTER_SUCCESS")
-                    #client.send("REGISTER_SUCCESS".encode('utf-8'))
-
-                    # ? Insert keys from client to db
-                    store_keys(client, username)
+        except:         # ? catch except if client exit on login/register
+            pass
 
         else:
-            client.send("INVALID_OPTION".encode('utf-8'))
+            # login option
+            if login_or_register.lower() == 'login':
+                try:
+                    # initial KEP and decryption on login data
+                    session_key = init_ecdh(client)
+                    login_data = init_decrypt(client, session_key)
+
+                    login_data = login_data.decode('utf-8').split()
+                    username = login_data[0]
+                    password = login_data[1]
+                except IndexError:
+                    pass
+                except ValueError:  # ? for except handle ecdh
+                    pass
+                else:
+                    # ! prevent same acc login twice
+                    if username in nicknames:
+                        init_encrypt(client, session_key, "LOGIN_DUPE")
+                    
+                    # else account has not log in yet, proceed login
+                    else:
+                        # Retrieve salt for the user
+                        cursor.execute('SELECT salt FROM users WHERE username = ?;', (username,))
+                        salt_data = cursor.fetchone()
+
+                        if salt_data:
+                            salt = salt_data[0]
+                            hashed_password = hash_password(password, salt)
+
+                            # Verify login credentials
+                            cursor.execute('SELECT id, username, password FROM users WHERE username = ? AND password = ?;', (username, hashed_password))
+                            user_data = cursor.fetchone()
+
+                            if user_data:
+                                init_encrypt(client, session_key, "LOGIN_SUCCESS")
+
+                                # ? Send all user keys from db to client - init_pqxdh()
+                                resp_init_pqxdh(client, user_data[0])
+
+                                # Set the username as the nickname
+                                nicknames.append(username)
+                                clients.append(client)
+
+                                # ? Send corresponder keys from db to client - askUserMsg() -> calc_pqxdh()
+                                # ! input valid here - loop if NO USER
+                                askUser_bool = resp_calc_pqxdh(client, session_key, nicknames, username)
+                                if not askUser_bool:
+                                    while not askUser_bool:
+                                        askUser_bool = resp_calc_pqxdh(client, session_key, nicknames, username)
+
+                                print(f"Nickname of the client is {username}")
+                                broadcast(f"{username} connected to the server!\n".encode('utf-8'))
+                                client.send("Connected to the server".encode('utf-8'))
+
+                                thread = threading.Thread(target=handle, args=(client,))
+                                thread.start()
+                            else:
+                                init_encrypt(client, session_key, "LOGIN_FAILED")
+
+                        else:
+                            init_encrypt(client, session_key, "LOGIN_FAILED")
+
+            # register option
+            elif login_or_register.lower() == 'register':
+                try:
+                    session_key = init_ecdh(client)
+                    register_data = init_decrypt(client, session_key)
+
+                    register_data = register_data.decode('utf-8').split()
+                    username = register_data[0]
+                    password = register_data[1]
+                except IndexError:
+                    pass
+                except ValueError:  # ? for except handle ecdh
+                    pass
+                else:
+                    # ! check if there are attempt on insert duplicate username
+                    cursor.execute('SELECT id FROM users WHERE username = ?;', (username, ))
+                    
+                    # ? if username exist, abort register
+                    if len(cursor.fetchall()) == 1:
+                        init_encrypt(client, session_key, "REGISTER_FAIL")
+                    
+                    # ? else cont register with username
+                    else:
+                        # Generate salt
+                        salt = generate_salt()
+
+                        # Hash password
+                        hashed_password = hash_password(password, salt)
+
+                        # Insert new user into the database
+                        cursor.execute('INSERT INTO users (username, password, salt) VALUES (?, ?, ?);', (username, hashed_password, salt))
+                        conn.commit()
+
+                        init_encrypt(client, session_key, "REGISTER_SUCCESS")
+
+                        # ? Insert keys from client to db
+                        store_keys(client, username)
+
+            else:
+                client.send("INVALID_OPTION".encode('utf-8'))
 
 banner()
 server_keygen()
