@@ -33,11 +33,11 @@ With the advancement of Quantum Computing, there has been a new theoretical thre
 </ul>
 <br>
 <h1> How do I run this project? </h1>
-<p>First, make sure to set the `HOST="..."` on both server and client are the same. Put `127.0.0.1` host it locally or your Internal IP address (use `cmd -> ipconfig` to get the IP) to host it in your LAN.
+<p>First, make sure to set the <code>HOST="..."</code> on both server and client are the same. Put <code>127.0.0.1</code> host it locally or your Internal IP address (use <code>cmd -> ipconfig</code> to get the IP) to host it in your LAN.
 As for now, hosting on the Internet is not possible, yet.
 Then, there are two ways to run the project:</p>
 <ol>
-    <li><p>Thru compiler</p></li>
+    <h2><li>Thru compiler</li></h2>
     <ul>
         <li><p>(Pre-requisite) You have to install all of the libraries above before running. <b>Make sure to add <u>--nodeps</u> option when installing py-kyber.</b> This is because it will downgrade pycryptodome version.</p></li>
         <br>
@@ -54,11 +54,12 @@ Then, there are two ways to run the project:</p>
         <li><p>Open Windows Terminal / CMD and run <code>python ./server.py</code>. <b>Make sure to not run it in any Python .venv - like in VSC.</b> For some reason, the server cannot work properly.</p></li>
         <li><p>Open another Terminal / CMD with the same directory and run <code>python ./testGui.py</code>.</p></li>
     </ul><br>
-<li><p>Thru compiled <code>.exe</code></p></li>
-    <ul>
-        <li><p>Do the same setup as server above.</p></li>
-        <li><p>Click the <code>testGui.exe</code> to start a client. (Note that if the IP is changed, the client needs to be rebuild again, since it's hardcoded.)</p></li>
-    </ul>
+    <h2><li>Thru compiled <code>.exe</code></li></h2>
+        <ul>
+            <li><p>Do the same setup as server above. (in future I will maybe package the server as exe)</p></li>
+            <li><p>Click the <code>testGui.exe</code> to start a client. (Note that if the IP is changed, the client needs to be rebuild again, since it's hardcoded.)</p></li>
+        </ul>
+</ol>
 <br>
 <h1> What this app looks like? </h1>
     <p>later insert pic here...</p>
