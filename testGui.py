@@ -136,7 +136,7 @@ from Crypto.Signature import eddsa
 from kyber import Kyber1024
 from pqc.sign import dilithium5
 
-HOST = '172.17.90.77'
+HOST = '127.0.0.1'
 PORT = 9090
 
 class Client:
@@ -467,6 +467,8 @@ class Client:
     # ? and perf. ENC or DEC
     def calc_pqxdh(self):
         askUser = self.username_input.get('1.0', 'end-1c')
+
+        # ! input valid here
 
         if askUser == self.nickname:
             messagebox.showerror(title="Error", message="You cannot message yourself (for now)!")
@@ -950,6 +952,8 @@ class Client:
     # * broadcasted to other users
     def write(self):
         message = f"{self.nickname}: {self.input_area.get('1.0', 'end-1c')}"
+
+        # ! input valid here
 
         # attempt pqxdh_encrypt_aead here
         message = self.init_encrypt_aead(self.secret_key, message)

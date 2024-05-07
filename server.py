@@ -91,7 +91,7 @@ from Crypto.Util.Padding import unpad, pad
 from kyber import Kyber1024
 from pqc.sign import dilithium5
 
-HOST = '172.17.90.77'
+HOST = '127.0.0.1'
 PORT = 9090
 
 server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -476,6 +476,8 @@ def handle(client):
     while True:
         try:
             message = client.recv(30720)
+
+            #print(message)
             
             # ? remove client from server list on exit
             # ! might need to revise method since user can malice type "LOG_OUT" lole
