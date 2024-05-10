@@ -9,6 +9,8 @@ This project was created to partially fulfill the requirements for the Bachelor 
 <p><i>
 With the advancement of Quantum Computing, there has been a new theoretical threat rising sometime in the future where they could potentially break current conventional encryption scheme; both asymmetric and symmetric with Shor's and Grover's Algorithm, once Quantum Computers become more available to the public.</i></p>
 <p><i>Current mitigation on this threat is to encapsulate current cryptographic scheme with a Post-Quantum or Quantum-Resistant mechanism. Any attacks on data confidentiality especially Store-Now-Decrypt-Later now must break through another layer of encryption that is theoretically resistant towards attacks from Quantum Computers.</i></p>
+<p>A proof-of-concept is to build a bare instant messaging platform where two parties can communicate in one session; with the mitigation implemented. Oversimplifying, the users will perform a Key Exchange Protocol, in which in it has a layer of Key Encapsulation Mechanism. The output is a secret key that both mutually share and can be used for encrypting subsequent messages in the session. Additionally, all messages are digitally signed on send and verified on receive using a Digital Signature Algorithm.</p>
+<p>For more detailed information on how this PoC works (because you are a crypto nerd or you are just bored), refer <a href="https://github.com/r3tr0-02/BASED/edit/main/README.md#-how-does-the-crypto-thingy-works-here-">here</a></p>
 <br>
 
 <h1> How this project was built?</h1>
@@ -64,7 +66,7 @@ Then, there are two ways to run the project:</p>
 <h1> What this app looks like? </h1>
     <p>later insert pic here...</p>
 <br>
-<h1> How does the crypto thingy works here?... </h1>
+<h1 id="detail"> How does the crypto thingy works here?... </h1>
     <p>later insert pic here...</p>
 <br>
 <h1>References</h1>
