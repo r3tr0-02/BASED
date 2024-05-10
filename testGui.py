@@ -323,23 +323,40 @@ class Client:
             self.sig_pqspk = self.sock.recv(20480).decode('utf-8')
             self.sig_pqspk = b64decode(self.sig_pqspk)
 
-            self.opk_key_public = ECC.import_key(self.sock.recv(1024).decode('utf-8'))
+            self.opk_key_public = self.sock.recv(1024).decode('utf-8')
+            if "NULL" not in self.opk_key_public:
+                self.opk_key_public = ECC.import_key(self.opk_key_public)
+            else:
+                self.opk_key_public = None
+
             json_key = self.sock.recv(1024).decode('utf-8')
-            json_key = json.loads(json_key)
-            cipher = AES.new(self.kdf(pwd.encode('utf-8')), AES.MODE_CBC, b64decode(json_key['iv']))
-            self.opk_key_private = unpad(cipher.decrypt(b64decode(json_key['opk_key_private'])), AES.block_size)
-            self.opk_key_private = ECC.import_key(self.opk_key_private.decode('utf-8'))
+            if "NULL" not in json_key:
+                json_key = json.loads(json_key)
+                cipher = AES.new(self.kdf(pwd.encode('utf-8')), AES.MODE_CBC, b64decode(json_key['iv']))
+                self.opk_key_private = unpad(cipher.decrypt(b64decode(json_key['opk_key_private'])), AES.block_size)
+                self.opk_key_private = ECC.import_key(self.opk_key_private.decode('utf-8'))
+            else:
+                self.opk_key_private = None
 
             self.pqopk_pkey = self.sock.recv(30720).decode('utf-8')
-            self.pqopk_pkey = b64decode(self.pqopk_pkey) 
+            if "NULL" not in self.pqopk_pkey:
+                self.pqopk_pkey = b64decode(self.pqopk_pkey)
+            else:
+                self.pqopk_pkey = None 
 
             json_key = self.sock.recv(30720).decode('utf-8')
-            json_key = json.loads(json_key)
-            cipher = AES.new(self.kdf(pwd.encode('utf-8')), AES.MODE_CBC, b64decode(json_key['iv']))
-            self.pqopk_skey = unpad(cipher.decrypt(b64decode(json_key['pqopk_skey'])), AES.block_size)
+            if "NULL" not in json_key:
+                json_key = json.loads(json_key)
+                cipher = AES.new(self.kdf(pwd.encode('utf-8')), AES.MODE_CBC, b64decode(json_key['iv']))
+                self.pqopk_skey = unpad(cipher.decrypt(b64decode(json_key['pqopk_skey'])), AES.block_size)
+            else:
+                self.pqopk_skey = None
 
             self.sig_pqopk = self.sock.recv(20480).decode('utf-8')
-            self.sig_pqopk = b64decode(self.sig_pqopk)
+            if "NULL" not in self.sig_pqopk:
+                self.sig_pqopk = b64decode(self.sig_pqopk)
+            else:
+                self.sig_pqopk = None
 
         # if register first time, publish all keys to server
         # ! may not be best way to do but encrypt all privkeys 
@@ -460,6 +477,56 @@ class Client:
             time.sleep(0.05)
             self.sock.send(str(sig_pqopk).encode('utf-8'))
 
+    def update_pqxdh(self, pwd):
+        if (self.opk_key_public is None and
+            self.opk_key_private is None and
+            self.sig_pqopk is None and
+            self.pqopk_pkey is None and
+            self.pqopk_skey is None):
+            
+            self.init_encrypt("UPD")
+
+            signer = eddsa.new(self.id_key_private, 'rfc8032')
+
+            opk_key = ECC.generate(curve='ed25519')
+            opk_key_public = opk_key.public_key().export_key(format='PEM')
+            opk_key_private = opk_key.export_key(format='PEM')
+            cipher = AES.new(self.kdf(pwd.encode('utf-8')), AES.MODE_CBC)
+            opk_key_private = cipher.encrypt(pad(opk_key_private.encode('utf-8'), AES.block_size))
+            opk_key_private = json.dumps(
+                {
+                    'iv': b64encode(cipher.iv).decode('utf-8'),
+                    'opk_key_private': b64encode(opk_key_private).decode('utf-8')
+                }
+            )
+
+            pqopk_pkey, pqopk_skey = Kyber1024.keygen()
+
+            sig_pqopk = signer.sign(SHA512.new(pqopk_pkey))
+            sig_pqopk = b64encode(sig_pqopk).decode('utf-8')
+
+            cipher = AES.new(self.kdf(pwd.encode('utf-8')), AES.MODE_CBC)
+            pqopk_skey = cipher.encrypt(pad(pqopk_skey, AES.block_size))
+            pqopk_pkey = b64encode(pqopk_pkey).decode('utf-8')
+            pqopk_skey = json.dumps(
+                {
+                    'iv': b64encode(cipher.iv).decode('utf-8'),
+                    'pqopk_skey': b64encode(pqopk_skey).decode('utf-8')
+                }
+            )
+
+            self.sock.send(opk_key_public.encode('utf-8'))
+            time.sleep(0.05)
+            self.sock.send(opk_key_private.encode('utf-8'))
+            time.sleep(0.05)
+            self.sock.send(pqopk_pkey.encode('utf-8'))
+            time.sleep(0.05)
+            self.sock.send(pqopk_skey.encode('utf-8'))
+            time.sleep(0.05)
+            self.sock.send(str(sig_pqopk).encode('utf-8'))
+        else:
+            self.init_encrypt("NO UPD")
+
     # * This function is to perform retrieve PQXDH keys from corresponding users 
     # * and perform calculation of secret key from both keypairs
     # ! ---
@@ -498,13 +565,24 @@ class Client:
                 sig_pqspk = self.sock.recv(20480).decode('utf-8')
                 sig_pqspk = b64decode(sig_pqspk)
 
-                opk_key_public = ECC.import_key(self.sock.recv(1024).decode('utf-8'))
+                opk_key_public = self.sock.recv(1024).decode('utf-8')
+                
+                if "NULL" not in opk_key_public:
+                    opk_key_public = ECC.import_key(opk_key_public)
+                else:
+                    opk_key_public = None
 
                 pqopk_pkey = self.sock.recv(30720).decode('utf-8')
-                pqopk_pkey = b64decode(pqopk_pkey)
+                if "NULL" not in pqopk_pkey:
+                    pqopk_pkey = b64decode(pqopk_pkey)
+                else:
+                    pqopk_pkey = None
 
                 sig_pqopk = self.sock.recv(20480).decode('utf-8')
-                sig_pqopk = b64decode(sig_pqopk)
+                if "NULL" not in sig_pqopk:
+                    sig_pqopk = b64decode(sig_pqopk)
+                else:
+                    sig_pqopk = None
 
                 # verify keys sent from server
                 verifier = eddsa.new(id_key_public, 'rfc8032')
@@ -512,7 +590,9 @@ class Client:
                 try:
                     verifier.verify(SHA512.new(spk_key_public.export_key(format='DER')), sig_spk)
                     verifier.verify(SHA512.new(pqspk_pkey), sig_pqspk)
-                    verifier.verify(SHA512.new(pqopk_pkey), sig_pqopk)
+                    
+                    if sig_pqopk is not None and pqopk_pkey is not None:
+                        verifier.verify(SHA512.new(pqopk_pkey), sig_pqopk)
                     
                 except ValueError:
                     pass
@@ -522,14 +602,24 @@ class Client:
                     self.ep_key_public = ep_key.public_key()
                     self.ep_key_private = ep_key
 
-                    ct_a, ss_a = Kyber1024.enc(pqopk_pkey)
+                    if pqopk_pkey is not None:
+                        ct_a, ss_a = Kyber1024.enc(pqopk_pkey)
+                        print("using pqopk") 
+                    else:
+                        ct_a, ss_a = Kyber1024.enc(pqspk_pkey)
+                        print("using pqspk")
 
                     dh_1 = key_agreement(static_priv=self.id_key_private, static_pub=spk_key_public, kdf=self.kdf)
                     dh_2 = key_agreement(static_priv=self.ep_key_private, static_pub=id_key_public, kdf=self.kdf)
                     dh_3 = key_agreement(static_priv=self.ep_key_private, static_pub=spk_key_public, kdf=self.kdf)
-                    dh_4 = key_agreement(static_priv=self.ep_key_private, static_pub=opk_key_public, kdf=self.kdf)
 
-                    self.secret_key = self.kdf(dh_1 + dh_2 + dh_3 + dh_4 + ss_a)
+                    if opk_key_public is not None:
+                        dh_4 = key_agreement(static_priv=self.ep_key_private, static_pub=opk_key_public, kdf=self.kdf)
+                        self.secret_key = self.kdf(dh_1 + dh_2 + dh_3 + dh_4 + ss_a)
+
+                    else:
+                        dh_4 = ""
+                        self.secret_key = self.kdf(dh_1 + dh_2 + dh_3 + ss_a)
 
                     # ! need to del all dh, ss vals
 
@@ -586,13 +676,24 @@ class Client:
                 sig_pqspk = self.sock.recv(20480).decode('utf-8')
                 sig_pqspk = b64decode(sig_pqspk)
 
-                opk_key_public = ECC.import_key(self.sock.recv(1024).decode('utf-8'))
+                opk_key_public = self.sock.recv(1024).decode('utf-8')
+                
+                if "NULL" not in opk_key_public:
+                    opk_key_public = ECC.import_key(opk_key_public)
+                else:
+                    opk_key_public = None
 
                 pqopk_pkey = self.sock.recv(30720).decode('utf-8')
-                pqopk_pkey = b64decode(pqopk_pkey)
+                if "NULL" not in pqopk_pkey:
+                    pqopk_pkey = b64decode(pqopk_pkey)
+                else:
+                    pqopk_pkey = None
 
                 sig_pqopk = self.sock.recv(20480).decode('utf-8')
-                sig_pqopk = b64decode(sig_pqopk)
+                if "NULL" not in sig_pqopk:
+                    sig_pqopk = b64decode(sig_pqopk)
+                else:
+                    sig_pqopk = None
 
                 ep_key_public = ECC.import_key(self.sock.recv(1024).decode('utf-8'))
 
@@ -605,7 +706,9 @@ class Client:
                 try:
                     verifier.verify(SHA512.new(spk_key_public.export_key(format='DER')), sig_spk)
                     verifier.verify(SHA512.new(pqspk_pkey), sig_pqspk)
-                    verifier.verify(SHA512.new(pqopk_pkey), sig_pqopk)
+
+                    if sig_pqopk is not None and pqopk_pkey is not None:
+                        verifier.verify(SHA512.new(pqopk_pkey), sig_pqopk)
                     
                 except ValueError:
                     pass
@@ -615,14 +718,23 @@ class Client:
                     self.ep_key_public = ep_key.public_key()
                     self.ep_key_private = ep_key
 
-                    pt = Kyber1024.dec(ct_a, self.pqopk_skey)
+                    if self.pqopk_skey is not None:
+                        pt = Kyber1024.dec(ct_a, self.pqopk_skey)
+                        print("using pqopk")
+                    else:
+                        pt = Kyber1024.dec(ct_a, self.pqspk_skey)
+                        print("using pqspk")
 
                     dh_1 = key_agreement(static_priv=self.spk_key_private, static_pub=id_key_public, kdf=self.kdf)
                     dh_2 = key_agreement(static_priv=self.id_key_private, static_pub=ep_key_public, kdf=self.kdf)
                     dh_3 = key_agreement(static_priv=self.spk_key_private, static_pub=ep_key_public, kdf=self.kdf)
-                    dh_4 = key_agreement(static_priv=self.opk_key_private, static_pub=ep_key_public, kdf=self.kdf)
 
-                    self.secret_key = self.kdf(dh_1 + dh_2 + dh_3 + dh_4 + pt)
+                    if self.opk_key_private is not None:
+                        dh_4 = key_agreement(static_priv=self.opk_key_private, static_pub=ep_key_public, kdf=self.kdf)
+                        self.secret_key = self.kdf(dh_1 + dh_2 + dh_3 + dh_4 + pt)
+                    else:
+                        dh_4 = ""
+                        self.secret_key = self.kdf(dh_1 + dh_2 + dh_3 + pt)
 
                     # ! need to del all dh, ss vals
                     pt = b''
@@ -832,6 +944,7 @@ class Client:
             self.login_win.destroy()
 
             self.init_pqxdh("login", password)
+            self.update_pqxdh(password)
 
             self.nickname = username
             self.gui_done = False

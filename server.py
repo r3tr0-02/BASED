@@ -65,6 +65,7 @@ receive()
 # // TODO : except handling on exit (init ecdh-decrypt)
 # TODO : start calc pqxdh sk - send all keys for client in clients in session?, then update?
 # TODO : look into resetting opk, spk as defined in paper ; replenish from client
+    # // TODO : reset and replenish opk as needed
 # // TODO : look into resetting pq_ct, ep_key after fetch
 # // TODO : clean up encryption method in separate funct
 
@@ -157,7 +158,7 @@ $$$$$$$  |$$ |  $$ |\$$$$$$  |$$$$$$$$\ $$$$$$$  |      \$$$$$$  |\$$$$$$$\ $$ |
 
 # * This function is to generate an ECC ed25519 keypair for server
 # ? server keypairs are stored locally in .pem files
-# ! server keypairs are not encrypted with passphrase
+# ! server keypairs are not encrypted with passphrase - may be vuln to deserial attack.
 # ? server keypairs are re-generated each runtime 
 def server_keygen():
     # Gen server-side keypair
@@ -325,6 +326,7 @@ def store_keys(client, username):
 
 # * This function is to retrieve user keys from database after successful login
 # ? This function will send all keys belonging to client
+# ! Still need to revise method of sending pt "NULL" over network - cannot send NoneType
 def resp_init_pqxdh(client, user_id):
     cursor.execute('SELECT * FROM keys WHERE user_id = ?;', (user_id,))
     keys = cursor.fetchone()
@@ -349,19 +351,66 @@ def resp_init_pqxdh(client, user_id):
     time.sleep(0.05)
     client.send(keys[10].encode('utf-8'))
     time.sleep(0.05)
-    client.send(keys[11].encode('utf-8'))
-    time.sleep(0.05)
-    client.send(keys[12].encode('utf-8'))
-    time.sleep(0.05)
-    client.send(keys[13].encode('utf-8'))
-    time.sleep(0.05)
-    client.send(keys[14].encode('utf-8'))
-    time.sleep(0.05)
-    client.send(keys[15].encode('utf-8'))
+
+    # Check if OPKs are not null
+    # ? if not null, send keys like usual
+    if (keys[11] is not None and
+        keys[12] is not None and
+        keys[13] is not None and
+        keys[14] is not None and
+        keys[15] is not None):
+            client.send(keys[11].encode('utf-8'))
+            time.sleep(0.05)
+            client.send(keys[12].encode('utf-8'))
+            time.sleep(0.05)
+            client.send(keys[13].encode('utf-8'))
+            time.sleep(0.05)
+            client.send(keys[14].encode('utf-8'))
+            time.sleep(0.05)
+            client.send(keys[15].encode('utf-8'))
+
+    # ? else append "NULL" as keys then send
+    # ! need to revise method later..
+    else:
+        client.send("NULL".encode('utf-8'))
+        time.sleep(0.05)
+        client.send("NULL".encode('utf-8'))
+        time.sleep(0.05)
+        client.send("NULL".encode('utf-8'))
+        time.sleep(0.05)
+        client.send("NULL".encode('utf-8'))
+        time.sleep(0.05)
+        client.send("NULL".encode('utf-8'))
+    
+# * This function is to retrieve new gen keys from users after
+# * OPKs deletion from one session
+def resp_update_pqxdh(client, session_key, user_id):
+    askUpdate = init_decrypt(client, session_key)
+    askUpdate = askUpdate.decode()
+
+    # if OPKs in db is null, update db with keys 
+    if askUpdate == "UPD":
+        opk_key_public = client.recv(1024).decode('utf-8')
+        opk_key_private = client.recv(1024).decode('utf-8')
+
+        pqopk_pkey = client.recv(30720).decode('utf-8')
+        pqopk_skey = client.recv(30720).decode('utf-8')
+
+        sig_pqopk = client.recv(20480).decode('utf-8')
+
+        cursor.execute('''UPDATE keys
+                    SET opk_key_public = ?, opk_key_private = ?,
+                    pqopk_pkey = ?, pqopk_skey = ?,
+                    sig_pqopk = ?
+                    WHERE user_id = ?''', (opk_key_public, opk_key_private, pqopk_pkey, pqopk_skey, sig_pqopk, user_id, ))
+        conn.commit()
 
 # * This function is to retrieve all pubkeys, sigs of users in server session,
-# ! --
+# ! Current implementation may be vulnerable to OPK exhaustion attack - default to SPK
 # ? This function send all keys and sigs of corresponding clients to client
+
+# ? If corresp. user has OPK, then perform ENC/DEC with PQOPK
+# ? Else, corresp. user don't have OPK ; perform ENC/DEC with PQSPK
 def resp_calc_pqxdh(client, session_key, nicknames, username):
 
     askUser = init_decrypt(client, session_key)
@@ -396,11 +445,26 @@ def resp_calc_pqxdh(client, session_key, nicknames, username):
             time.sleep(0.05)
             client.send(keys[5].encode('utf-8'))
             time.sleep(0.05)
-            client.send(keys[6].encode('utf-8'))
-            time.sleep(0.05)
-            client.send(keys[7].encode('utf-8'))
-            time.sleep(0.05)
-            client.send(keys[8].encode('utf-8'))
+
+            # Check if OPKs are not null
+            # ? if not null, send keys like usual
+            if (keys[6] is not None and
+                keys[7] is not None and
+                keys[8] is not None):
+                    client.send(keys[6].encode('utf-8'))
+                    time.sleep(0.05)
+                    client.send(keys[7].encode('utf-8'))
+                    time.sleep(0.05)
+                    client.send(keys[8].encode('utf-8'))
+
+            # ? else append "NULL" as keys then send
+            # ! need to revise method later..
+            else:
+                client.send("NULL".encode('utf-8'))
+                time.sleep(0.05)
+                client.send("NULL".encode('utf-8'))
+                time.sleep(0.05)
+                client.send("NULL".encode('utf-8'))
 
             ct_a = client.recv(30720).decode('utf-8')
             ep_key_public = client.recv(1024).decode('utf-8')
@@ -409,6 +473,7 @@ def resp_calc_pqxdh(client, session_key, nicknames, username):
             user_id = cursor.fetchone()
             user_id = user_id[0]
 
+            # publish ENC's product to db so corresp. can fetch and DEC
             cursor.execute('UPDATE keys SET ep_key_public = ?, pq_ct = ? WHERE user_id = ?;', (ep_key_public, ct_a, user_id, ))
             conn.commit()
 
@@ -435,19 +500,37 @@ def resp_calc_pqxdh(client, session_key, nicknames, username):
             time.sleep(0.05)
             client.send(keys[5].encode('utf-8'))
             time.sleep(0.05)
-            client.send(keys[6].encode('utf-8'))
-            time.sleep(0.05)
-            client.send(keys[7].encode('utf-8'))
-            time.sleep(0.05)
-            client.send(keys[8].encode('utf-8'))
+
+            # Check if OPKs are not null
+            # ? if not null, send keys like usual
+            if (keys[6] is not None and
+                keys[7] is not None and
+                keys[8] is not None):
+                    client.send(keys[6].encode('utf-8'))
+                    time.sleep(0.05)
+                    client.send(keys[7].encode('utf-8'))
+                    time.sleep(0.05)
+                    client.send(keys[8].encode('utf-8'))
+            
+            # ? else append "NULL" as keys then send
+            # ! need to revise method later..
+            else:
+                client.send("NULL".encode('utf-8'))
+                time.sleep(0.05)
+                client.send("NULL".encode('utf-8'))
+                time.sleep(0.05)
+                client.send("NULL".encode('utf-8'))
+
             time.sleep(0.05)
             client.send(keys[9].encode('utf-8'))
             time.sleep(0.05)
             client.send(keys[10].encode('utf-8'))
-            time.sleep(0.05)
-            client.send(keys[10].encode('utf-8'))
 
-            cursor.execute('UPDATE keys SET ep_key_public = ?, pq_ct = ? WHERE user_id = ?;', ("", "", user_id, ))
+            cursor.execute('''UPDATE keys
+                SET opk_key_public = ?, opk_key_private = ?, 
+                pqopk_pkey = ?, pqopk_skey = ?,
+                sig_pqopk = ?,
+                ep_key_public = ?, pq_ct = ? WHERE user_id = ?;''', (None, None, None, None, None, None, None, user_id, ))
             conn.commit()
 
             return True
@@ -554,6 +637,9 @@ def receive():
 
                                 # ? Send all user keys from db to client - init_pqxdh()
                                 resp_init_pqxdh(client, user_data[0])
+
+                                # ? Recv new gen. opk from user - update_pqxdh()
+                                resp_update_pqxdh(client, session_key, user_data[0])
 
                                 # Set the username as the nickname
                                 nicknames.append(username)
