@@ -66,6 +66,7 @@ receive()
 # TODO : start calc pqxdh sk - send all keys for client in clients in session?, then update?
 # TODO : look into resetting opk, spk as defined in paper ; replenish from client
     # // TODO : reset and replenish opk as needed
+# TODO : change server pki to mem-only ; prevent deserial attk
 # // TODO : look into resetting pq_ct, ep_key after fetch
 # // TODO : clean up encryption method in separate funct
 
@@ -161,31 +162,15 @@ $$$$$$$  |$$ |  $$ |\$$$$$$  |$$$$$$$$\ $$$$$$$  |      \$$$$$$  |\$$$$$$$\ $$ |
 # ! server keypairs are not encrypted with passphrase - may be vuln to deserial attack.
 # ? server keypairs are re-generated each runtime 
 def server_keygen():
-    # Gen server-side keypair
-    server_key = ECC.generate(curve='ed25519')
-
-    # set keypair to session
-    server_key_public = server_key.public_key()
-    server_key_private = server_key
-
     # export server keypair
     print("\n\nVERSION vx.x - Unauthorized Access is Prohibited.")
     print("\nserver_keygen() >>>")
 
-    # export server private key
-    with open("server_key_private.pem", "wt") as f:
-        
-        data = server_key.export_key(format='PEM',
-                                    protection='PBKDF2WithHMAC-SHA512AndAES256-CBC',
-                                    prot_params={'iteration_count':131072})
-        f.write(data)
-        f.close()
-        
-    # export server public key
-    with open("server_key_public.pem", "wt") as f:
-        server_key_public = server_key.public_key().export_key(format='PEM')
-        f.write(data)
-        f.close()
+    # Gen server-side keypair
+    server_key = ECC.generate(curve='ed25519')
+
+    # set keypair to session
+    return server_key
 
 # * This function is to generate a Kyber-1024 keypair for server
 # ! This function is not used anymore as of test v1.3 Alpha
@@ -196,20 +181,21 @@ def server_keygen():
 # //    return server_pq_key_public, server_pq_key_private
 
 # * This function is to get server private key from .pem file
-def read_server_private_key():
-    with open("server_key_private.pem", "rt") as f:
-        data = f.read()
-        server_key_private = ECC.import_key(data)
+# ! This function is not used anymore as of test v1.7 
+# // def read_server_private_key():
+# //      with open("server_key_private.pem", "rt") as f:
+# //          data = f.read()
+# //          server_key_private = ECC.import_key(data)
 
-    return server_key_private
+# //      return server_key_private
 
 # * This function is to get server public key from .pem file
-def read_server_public_key():
-    with open("server_key_public.pem", "rt") as f:
-        data = f.read()
-        server_key_public = ECC.import_key(data)
+# //  def read_server_public_key():
+# //      with open("server_key_public.pem", "rt") as f:
+# //          data = f.read()
+# //          server_key_public = ECC.import_key(data)
 
-    return server_key_public
+# //      return server_key_public
 
 # * This function is for Key Derivation Function for ECDH op.
 def kdf(x):
@@ -219,8 +205,10 @@ def kdf(x):
 # ? This function will return a shared session key
 def init_ecdh(client):
     # read server keypair for op.
-    server_key_public = read_server_public_key()
-    server_key_private = read_server_private_key()
+    #server_key = server_keygen()
+
+    #server_key_public = server_key.public_key()
+    #server_key_private = server_key
 
     # import user_key_public from user
     user_key_public = ECC.import_key(client.recv(1024).decode('utf-8'))
@@ -563,7 +551,7 @@ def handle(client):
             #print(message)
             
             # ? remove client from server list on exit
-            # ! might need to revise method since user can malice type "LOG_OUT" lole
+            # // ! might need to revise method since user can malice type "LOG_OUT" lole
             if message.decode('utf-8') == "LOG_OUT":
                 raise ConnectionError
             else:
@@ -706,6 +694,9 @@ def receive():
                 client.send("INVALID_OPTION".encode('utf-8'))
 
 banner()
-server_keygen()
+server_key = server_keygen()
+server_key_public = server_key.public_key()
+server_key_private = server_key
+
 print("\nServer is running!")
 receive()

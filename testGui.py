@@ -100,7 +100,7 @@ client = Client(HOST, PORT)
 # // TODO : start init. pqxdh key gen
 # TODO : start calc pqxdh sk - get current clients in session, then update SK each time?
 # TODO : research on how to do clients > 2 ?
-    # TODO : resort to askMsguser? 
+    # // TODO : resort to askMsguser? 
 # TODO : research on what happen if client exit
     # // TODO : fix memleak on exit - gui_thread, recv_thread
 # // TODO : polish on message exit - both client shut
@@ -536,9 +536,12 @@ class Client:
         askUser = self.username_input.get('1.0', 'end-1c')
 
         # ! input valid here
+        if len(askUser) == 0:
+            messagebox.showerror(title="Error", message="User cannot be empty!")
 
-        if askUser == self.nickname:
+        elif askUser == self.nickname:
             messagebox.showerror(title="Error", message="You cannot message yourself (for now)!")
+
         else:
             askUser = f'{askUser}'
 
@@ -928,53 +931,55 @@ class Client:
         password = self.password_input.get('1.0', 'end-1c')
 
         # ! input might get sanitized here
-
-        login_data = f"{username} {password}"
-
-        # initial KEP and encryption on login data
-        # ? encrypted data will be sent on encrypt()
-        self.init_ecdh()
-        self.init_encrypt(login_data)
-
-        # Wait for server response
-        login_response = self.init_decrypt()
-
-        # if login success, goto message_gui
-        if login_response == "LOGIN_SUCCESS":
-            self.login_win.destroy()
-
-            self.init_pqxdh("login", password)
-            self.update_pqxdh(password)
-
-            self.nickname = username
-            self.gui_done = False
-            self.running = True
-
-            self.ask_userMsg_gui()
-
-        # if login dupe, abort login
-        elif login_response == "LOGIN_DUPE":
-            messagebox.showerror(title="Error", message="Your account has been logged in by another client!")
-
-            # ! for some reason, retry after login will result in conn drop
-            # ? temp solution is to close the current conn and re-init the conn
-            self.sock.close()
-
-            self.login_win.destroy()
-
-            self.__init__(HOST, PORT)
-
-        # if login fail, go back to login_or_register
+        if len(username) == 0 or len(password) == 0:
+            messagebox.showerror(title="Error", message="Username / Password cannot be empty!")
         else:
-            messagebox.showerror(title="Error", message="Your username and/or password is incorrect!")
+            login_data = f"{username} {password}"
 
-            # ! for some reason, retry after login will result in conn drop
-            # ? temp solution is to close the current conn and re-init the conn
-            self.sock.close()
+            # initial KEP and encryption on login data
+            # ? encrypted data will be sent on encrypt()
+            self.init_ecdh()
+            self.init_encrypt(login_data)
 
-            self.login_win.destroy()
+            # Wait for server response
+            login_response = self.init_decrypt()
 
-            self.__init__(HOST, PORT)
+            # if login success, goto message_gui
+            if login_response == "LOGIN_SUCCESS":
+                self.login_win.destroy()
+
+                self.init_pqxdh("login", password)
+                self.update_pqxdh(password)
+
+                self.nickname = username
+                self.gui_done = False
+                self.running = True
+
+                self.ask_userMsg_gui()
+
+            # if login dupe, abort login
+            elif login_response == "LOGIN_DUPE":
+                messagebox.showerror(title="Error", message="Your account has been logged in by another client!")
+
+                # ! for some reason, retry after login will result in conn drop
+                # ? temp solution is to close the current conn and re-init the conn
+                self.sock.close()
+
+                self.login_win.destroy()
+
+                self.__init__(HOST, PORT)
+
+            # if login fail, go back to login_or_register
+            else:
+                messagebox.showerror(title="Error", message="Your username and/or password is incorrect!")
+
+                # ! for some reason, retry after login will result in conn drop
+                # ? temp solution is to close the current conn and re-init the conn
+                self.sock.close()
+
+                self.login_win.destroy()
+
+                self.__init__(HOST, PORT)
 
     # * This function is to get input from register_gui funct and send to
     # * server for verification
@@ -987,39 +992,40 @@ class Client:
         confirm_password = self.confirm_password_input.get('1.0', 'end-1c')
 
         # ! input might get sanitized here
+        if len(username) == 0 or len(password) == 0 or len(confirm_password) == 0:
+            messagebox.showerror(title="Error", message="Username / Password cannot be empty!")
 
-        if password == confirm_password and (len(password) != 0 and len(confirm_password) != 0):
-            register_data = f"{username} {password}"
-            
-            # initial KEP and encryption on login data
-            # ? encrypted data will be sent on encrypt()
-            self.init_ecdh()
-            self.init_encrypt(register_data)
-
-            # Wait for server response
-            register_response = self.init_decrypt()
-
-            print(register_response)
-
-            if register_response == "REGISTER_SUCCESS":
-                self.init_pqxdh(state="register", pwd=password)
-                messagebox.showinfo(title="Info", message="Registration complete. Please log in using your username and password.")
-                
-                # ! same handle case as login, close and re-init conn after exit win
-                self.sock.close()
-                self.register_win.destroy()
-                self.__init__(HOST, PORT)
-            else:
-                tk.messagebox.showerror(title="Error", message="Registration Failed!")
-
-                # ! same handle case as login, close and re-init conn after exit win
-                self.sock.close()
-                self.register_win.destroy()
-                self.__init__(HOST, PORT)
         else:
-            tk.messagebox.showerror(title="Error", message="Please double confirm your password!")
-            self.password_input.delete('1.0', 'end')
-            self.confirm_password_input.delete('1.0', 'end')
+            if password == confirm_password and (len(password) != 0 and len(confirm_password) != 0):
+                register_data = f"{username} {password}"
+                
+                # initial KEP and encryption on login data
+                # ? encrypted data will be sent on encrypt()
+                self.init_ecdh()
+                self.init_encrypt(register_data)
+
+                # Wait for server response
+                register_response = self.init_decrypt()
+
+                if register_response == "REGISTER_SUCCESS":
+                    self.init_pqxdh(state="register", pwd=password)
+                    messagebox.showinfo(title="Info", message="Registration complete. Please log in using your username and password.")
+                    
+                    # ! same handle case as login, close and re-init conn after exit win
+                    self.sock.close()
+                    self.register_win.destroy()
+                    self.__init__(HOST, PORT)
+                else:
+                    tk.messagebox.showerror(title="Error", message="Registration Failed!")
+
+                    # ! same handle case as login, close and re-init conn after exit win
+                    self.sock.close()
+                    self.register_win.destroy()
+                    self.__init__(HOST, PORT)
+            else:
+                tk.messagebox.showerror(title="Error", message="Please double confirm your password!")
+                self.password_input.delete('1.0', 'end')
+                self.confirm_password_input.delete('1.0', 'end')
 
     # * This function is to get input from user message and display message
     # * from other users
@@ -1064,15 +1070,20 @@ class Client:
     # * This function is to send message from user to server for it to be 
     # * broadcasted to other users
     def write(self):
-        message = f"{self.nickname}: {self.input_area.get('1.0', 'end-1c')}"
+        message = self.input_area.get('1.0', 'end-1c')
 
         # ! input valid here
+        if len(message) == 0:
+            messagebox.showerror(title="Error", message="Message cannot be empty!")
 
-        # attempt pqxdh_encrypt_aead here
-        message = self.init_encrypt_aead(self.secret_key, message)
+        else:
+            message = f"{self.nickname}: {message}"
 
-        self.sock.send(message.encode('utf-8'))
-        self.input_area.delete('1.0', 'end')
+            # attempt pqxdh_encrypt_aead here
+            message = self.init_encrypt_aead(self.secret_key, message)
+
+            self.sock.send(message.encode('utf-8'))
+            self.input_area.delete('1.0', 'end')
 
     # `* All stop funct below is to handle event where a window is closed
     # ? might be a better way to do this...
