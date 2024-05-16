@@ -98,6 +98,7 @@ client = Client(HOST, PORT)
 # // TODO : polish retry login after fail - some uncaught exception / logic err
 # // TODO : clean up encryption method in separate funct
 # // TODO : start init. pqxdh key gen
+# // TODO : add dig sign on init_ecdh for server_key_public?
 # TODO : start calc pqxdh sk - get current clients in session, then update SK each time?
 # TODO : research on how to do clients > 2 ?
     # // TODO : resort to askMsguser? 
@@ -164,6 +165,10 @@ class Client:
         self.user_key_public = user_key.public_key()
         self.user_key_private = user_key
 
+        signer = eddsa.new(self.user_key_private, 'rfc8032')
+        self.user_key_sig = signer.sign(SHA512.new(self.user_key_public.export_key(format='DER')))
+        self.user_key_sig = b64encode(self.user_key_sig).decode('utf-8')
+
     # * This function is for Key Derivation Function for ECDH op.
     def kdf(self, x):
         return SHAKE128.new(x).read(32)
@@ -172,16 +177,26 @@ class Client:
     # ? This function will return a shared session key
     def init_ecdh(self):
         
-        # export user_key_public as PEM and send to server
+        # export user_key_public as PEM, user_key_sig and send to server
         self.sock.send(str(self.user_key_public.export_key(format='PEM')).encode('utf-8'))
+        self.sock.send(self.user_key_sig.encode('utf-8'))
 
-        # import server_key_public from server
+        # import server_key_public, server_key_sig from server
         server_key_public = ECC.import_key(self.sock.recv(1024).decode('utf-8'))
+        server_key_sig = self.sock.recv(1024).decode('utf-8')
+        server_key_sig = b64decode(server_key_sig)
 
-        # perform ecdh on client-server
-        self.session_key = key_agreement(static_priv=self.user_key_private,
-                                        static_pub=server_key_public,
-                                        kdf=self.kdf)
+        # verify server_key_public with sig
+        verifier = eddsa.new(server_key_public, 'rfc8032')
+        try:
+            verifier.verify(SHA512.new(server_key_public.export_key(format='DER')), server_key_sig)
+        except:
+            messagebox.showerror(title="Error", message="Server key cannot be verified!")
+        else:
+            # perform ecdh on client-server
+            self.session_key = key_agreement(static_priv=self.user_key_private,
+                                            static_pub=server_key_public,
+                                            kdf=self.kdf)
 
     # * This function is to perform initial encryption of user data
     # ? This function will return encrypted user data

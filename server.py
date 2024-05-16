@@ -63,10 +63,11 @@ receive()
 # // TODO : retrieve user keys from db on login 
 # // TODO : maybe except handling on register dupe users?
 # // TODO : except handling on exit (init ecdh-decrypt)
+# // TODO : add dig sign on init_ecdh for user_key_public?
 # TODO : start calc pqxdh sk - send all keys for client in clients in session?, then update?
-# TODO : look into resetting opk, spk as defined in paper ; replenish from client
+# TODO : look into resetting spk as defined in paper ; replenish from client
     # // TODO : reset and replenish opk as needed
-# TODO : change server pki to mem-only ; prevent deserial attk
+# // TODO : change server pki to mem-only ; prevent deserial attk
 # // TODO : look into resetting pq_ct, ep_key after fetch
 # // TODO : clean up encryption method in separate funct
 
@@ -85,9 +86,10 @@ import secrets
 ### These libs are used for conv. symm / asymm op.
 from Crypto.PublicKey import ECC
 from Crypto.Protocol.DH import key_agreement
-from Crypto.Hash import SHAKE128
+from Crypto.Hash import SHAKE128, SHA512
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import unpad, pad
+from Crypto.Signature import eddsa
 
 ### These libs are used for Post-Quantum op.
 from kyber import Kyber1024
@@ -172,6 +174,17 @@ def server_keygen():
     # set keypair to session
     return server_key
 
+# * This function is to generate an EdDSA signature of server_key_public
+# ? The signature is passed to client to be verified upon first-moment comm.
+# ? before init_ecdh()
+def server_keysign():
+    signer = eddsa.new(server_key_private, 'rfc8032')
+
+    server_key_sig = signer.sign(SHA512.new(server_key_public.export_key(format='DER')))
+    server_key_sig = b64encode(server_key_sig).decode('utf-8')
+
+    return server_key_sig
+
 # * This function is to generate a Kyber-1024 keypair for server
 # ! This function is not used anymore as of test v1.3 Alpha
 # ? server keypairs are stored in memory
@@ -212,16 +225,26 @@ def init_ecdh(client):
 
     # import user_key_public from user
     user_key_public = ECC.import_key(client.recv(1024).decode('utf-8'))
+    user_key_sig = client.recv(1024).decode('utf-8')
+    user_key_sig = b64decode(user_key_sig)
 
     # export server_key_public as PEM send to user
     client.send(str(server_key_public.export_key(format='PEM')).encode('utf-8'))
+    client.send(server_key_sig.encode('utf-8'))
 
-    # perform ecdh on server-client
-    session_key = key_agreement(static_priv=server_key_private,
-                                static_pub=user_key_public,
-                                kdf=kdf)
-    
-    return session_key
+    # verify user_key_public with sig
+    verifier = eddsa.new(user_key_public, 'rfc8032')
+    try:
+        verifier.verify(SHA512.new(user_key_public.export_key(format='DER')), user_key_sig)
+    except:
+        print("User key cannot be verified!")
+    else:
+        # perform ecdh on server-client
+        session_key = key_agreement(static_priv=server_key_private,
+                                    static_pub=user_key_public,
+                                    kdf=kdf)
+        
+        return session_key
 
 # * This function is to perform initial encryption of server response
 # ? This function will return encrypted server response
@@ -697,6 +720,7 @@ banner()
 server_key = server_keygen()
 server_key_public = server_key.public_key()
 server_key_private = server_key
+server_key_sig = server_keysign()
 
 print("\nServer is running!")
 receive()
