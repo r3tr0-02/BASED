@@ -64,10 +64,83 @@ Then, there are two ways to run the project:</p>
 </ol>
 <br>
 <h1> What this app looks like? </h1>
-    <p>later insert pic here...</p>
-<br>
+    <h2>Normal Operations</h2>
+    <p>Upon starting the server, it will display a banner message and a notification that it is ready to accept incoming client's connection.</p>
+	<img src="https://github.com/r3tr0-02/BASED/blob/main/Assets/server_init.png" alt="server_init">
+	<br>
+	<p>Upon starting the client, it will display an initial page with two options, either to register an account or login.</p>
+	<img src="https://github.com/r3tr0-02/BASED/blob/main/Assets/client_init.png" alt="client_init">
+	<br>
+	<p>New users can go on to register a new account by clicking register. A register page will appear.</p>
+	<img src="https://github.com/r3tr0-02/BASED/blob/main/Assets/client_register.png" alt="client_register">
+	<br>
+	<p>A pop-up will notify user on successful account registration.</p>
+	<img src="https://github.com/r3tr0-02/BASED/blob/main/Assets/client_register_success.png" alt="client_register_success">
+	<br>
+	<p>Users can login to their account by clicking the login button. A login page will appear.</p>
+	<img src="https://github.com/r3tr0-02/BASED/blob/main/Assets/client_login.png" alt="client_login">
+	<br>
+	<p>On successful account login, user will be asked who they want to message to. This works like a private chat (user-to-user).</p>
+	<img src="https://github.com/r3tr0-02/BASED/blob/main/Assets/set_message_recv.png" alt="set_message_recv">
+	<br>
+	<p>On successful setting correspondent user, chat session is started and users can start to send and receive message.</p>
+	<img src="https://github.com/r3tr0-02/BASED/blob/main/Assets/client_message.png" alt="client_message">
+	<br>
+	<p>Once the correspondent user logged in and set their correspondence as the first user, both users can send and receive message.</p>
+	<p><i>Note that in picture below, the client on the left is "test123" and the client on the right is "asdasd"</i></p>
+	<p>On successful verification of message, a string ("- OK") will be appended to the end of message.</p>
+	<img src="https://github.com/r3tr0-02/BASED/blob/main/Assets/client_message_send_recvOK.png" alt="client_message_send_recvOK">
+	<br>
+	<p>For the server side, it will display which user successfully logged in and in session.</p>
+	<img src="https://github.com/r3tr0-02/BASED/blob/main/Assets/server_client_login.png" alt="server_client_login">
+	<br>
+	<p>When clients close the message window, it will also log out the client on the server side.</p>
+	<img src="https://github.com/r3tr0-02/BASED/blob/main/Assets/server_client_logout.png" alt="server_client_logout">
+	<br>
+	<h2>Abnormal operations : Input validations and Exception Handlings</h2>
+	<h3>Client init.</h3>
+	<p>If the client is started but failed to connect to a server (because the server is not started or is being set with wrong IP), a pop-up window will notify user that the server is unreachable, then will exit the application.</p>
+	<img src="https://github.com/r3tr0-02/BASED/blob/main/Assets/client_init_fail.png" alt="client_init_fail">
+	<br>
+	<h3>Register</h3>
+	<p>If a user tries to register an existing account on database, or the registration process failed, a pop-up window will notify user that the registration process failed.</p>
+	<p>This is to prevent identity fraud on the platform - every user must have distinct username.</p>
+	<img src="https://github.com/r3tr0-02/BASED/blob/main/Assets/client_register_fail.png" alt="client_register_fail">
+	<br>
+	<p>Similarly, if a user tries to register an account but the password is not same as confirm password field, a pop-up window will notify user to double-confirm their password.</p>
+	<img src="https://github.com/r3tr0-02/BASED/blob/main/Assets/client_register_fail_notconfirmpass.png" alt="client_register_fail_notconfirmpass">
+	<br>
+	<p>If a user tries to register an account but one of the entries are empty, a pop-up window will notify user to double-confirm their inputs.</p>
+	<img src="https://github.com/r3tr0-02/BASED/blob/main/Assets/client_register_fail_noinput.png" alt="client_register_fail_noinput">
+	<br>
+	<h3>Login</h3>
+	<p>If a user tries to login to an account that has been in the server's session, a pop-up window will notify user that the login process failed.</p>
+	<p>This is because one client is set uniquely to one credential / account on login.</p>
+	<img src="https://github.com/r3tr0-02/BASED/blob/main/Assets/client_login_fail_dupe.png" alt="client_login_fail_dupe">
+	<br>
+	<p>Similarly, if a user tries to login to an account but one of the entries are empty, a pop-up window will notify user to double-confirm their inputs.</p>
+	<img src="https://github.com/r3tr0-02/BASED/blob/main/Assets/client_login_fail_noinput.png" alt="client_login_fail_noinput">
+	<br>
+	<h3>Set Message Receiver / Correspondence</h3>
+	<p>If a user tries to set their message receiver to a non-existent account, a pop-up window will notify user that no user is found.</p>
+	<img src="https://github.com/r3tr0-02/BASED/blob/main/Assets/set_message_recv_fail_nouser.png" alt="set_message_recv_fail_nouser">
+	<br>
+	<p>If the input is empty, a pop-up window will notify user to double-confirm their inputs.</p>
+	<img src="https://github.com/r3tr0-02/BASED/blob/main/Assets/set_message_recv_fail_noinput.png" alt="set_message_recv_fail_noinput">
+	<br>
+	<p>If a user tries to set their correspondence receiver to themselves, a pop-up window will notify user that this action is not permissible.</p>
+	<p>Theoretically, this action could break the application (Also, the server will not allow a second instance of the same account to message the same account.)
+	<img src="https://github.com/r3tr0-02/BASED/blob/main/Assets/set_message_recv_fail_selfset.png" alt="set_message_recv_fail_selfset">
+	<h3>Message</h3>
+	<p>If a user tries to send an empty message, a pop-up window will notify user that message cannot be empty.</p>
+	<img src="https://github.com/r3tr0-02/BASED/blob/main/Assets/client_message_fail_noinput.png" alt="client_message_fail_noinput">
+	<br>
+	<p>In a more unlikely scenario, if a message from correspondent user cannot be verified (due to a bad signature or attempt on message manipulation by a threat actor), message will be appended with a "- NOT OK" to denote that the message should not be trusted because it cannot be verified.</p>
+	<p><i>Note that in picture below, the client on the left is "test123" and the client on the right is "asdasd"</i></p>
+	<img src="https://github.com/r3tr0-02/BASED/blob/main/Assets/client_message_fail_noverify.png" alt="client_message_fail_noverify">
+	<br>
 <h1 id="detail"> How does the crypto thingy works here?... </h1>
-    <p>later insert pic here...</p>
+	
 <br>
 <h1>References</h1>
     <p>later here...</p>
