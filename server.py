@@ -658,17 +658,20 @@ def receive():
 
                                 # ? Send corresponder keys from db to client - askUserMsg() -> calc_pqxdh()
                                 # ! input valid here - loop if NO USER
-                                askUser_bool = resp_calc_pqxdh(client, session_key, nicknames, username)
-                                if not askUser_bool:
-                                    while not askUser_bool:
-                                        askUser_bool = resp_calc_pqxdh(client, session_key, nicknames, username)
+                                try:
+                                    askUser_bool = resp_calc_pqxdh(client, session_key, nicknames, username)
+                                    if not askUser_bool:
+                                        while not askUser_bool:
+                                            askUser_bool = resp_calc_pqxdh(client, session_key, nicknames, username)
+                                except:
+                                    pass
+                                else:
+                                    print(f"Nickname of the client is {username}")
+                                    broadcast(f"{username} connected to the server!\n".encode('utf-8'))
+                                    client.send("Connected to the server".encode('utf-8'))
 
-                                print(f"Nickname of the client is {username}")
-                                broadcast(f"{username} connected to the server!\n".encode('utf-8'))
-                                client.send("Connected to the server".encode('utf-8'))
-
-                                thread = threading.Thread(target=handle, args=(client,))
-                                thread.start()
+                                    thread = threading.Thread(target=handle, args=(client,))
+                                    thread.start()
                             else:
                                 init_encrypt(client, session_key, "LOGIN_FAILED")
 

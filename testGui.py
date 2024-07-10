@@ -101,6 +101,7 @@ client = Client(HOST, PORT)
 # // TODO : add dig sign on init_ecdh for server_key_public?
 # TODO : start calc pqxdh sk - get current clients in session, then update SK each time?
 # TODO : research on how to do clients > 2 ?
+# TODO : update calc_pqxdh()'s AD (header) w/ jason ; username: pkey..., time
     # // TODO : resort to askMsguser? 
 # TODO : research on what happen if client exit
     # // TODO : fix memleak on exit - gui_thread, recv_thread
