@@ -1,4 +1,5 @@
 <h1> BASED </h1>
+<p><a href="https://github.com/r3tr0-02/BASED">Project Link</a></p>
 <p>
 A Client-Server messaging application build using Python GUI and Socket Programming while implementing Hybrid Post-Quantum Encryption and KEP.</p>
 <br>
@@ -57,9 +58,10 @@ Then, there are two ways to run the project:</p>
         <li><p>Open another Terminal / CMD with the same directory and run <code>python ./testGui.py</code>.</p></li>
     </ul><br>
     <h2><li>Thru compiled <code>.exe</code></li></h2>
+    <p>Note that the IP used in the compiled code is <code>127.0.0.1</code>.</p>
         <ul>
-            <li><p>Do the same setup as server above. (in future I will maybe package the server as exe)</p></li>
-            <li><p>Click the <code>testGui.exe</code> to start a client. (Note that if the IP is changed, the client needs to be rebuild again, since it's hardcoded.)</p></li>
+            <li><p>Click the <code>server.exe</code> in <code>/dist</code> dir</p></li>
+            <li><p>Click the <code>testGui.exe</code> in <code>/dist</code> dir to start a client.</p></li>
         </ul>
 </ol>
 <br>
@@ -129,7 +131,7 @@ Then, there are two ways to run the project:</p>
 	<img src="https://github.com/r3tr0-02/BASED/blob/main/Assets/set_message_recv_fail_noinput.png" alt="set_message_recv_fail_noinput">
 	<br>
 	<p>If a user tries to set their correspondence receiver to themselves, a pop-up window will notify user that this action is not permissible.</p>
-	<p>Theoretically, this action could break the application (Also, the server will not allow a second instance of the same account to message the same account.)
+	<p>Theoretically, this action could break the application (Also, the server will not allow a second instance of the same account to message the same account.)</p>
 	<img src="https://github.com/r3tr0-02/BASED/blob/main/Assets/set_message_recv_fail_selfset.png" alt="set_message_recv_fail_selfset">
 	<h3>Message</h3>
 	<p>If a user tries to send an empty message, a pop-up window will notify user that message cannot be empty.</p>
@@ -140,10 +142,11 @@ Then, there are two ways to run the project:</p>
 	<img src="https://github.com/r3tr0-02/BASED/blob/main/Assets/client_message_fail_noverify.png" alt="client_message_fail_noverify">
 	<br>
 <h1 id="detail"> How does the crypto thingy works here?... </h1>
+<p>The thesis of this project can be read here : </p>
 	
 <br>
 <h1>References</h1>
-    <p>later here...</p>
+    <a href="https://signal.org/docs/specifications/pqxdh/pqxdh.pdf"><p>E. Kret and R. Schmidt, “The PQXDH Key Agreement Protocol,” <i>Signal Protocol Documentation</i></p></a>
 <br>
 <h1> LICENSE </h1>
     <p>License of this project are in LICENSE file, using GPL v2.0. <code>You are free to use the source code in this repository ONLY for educational purposes, only.</code></p>
