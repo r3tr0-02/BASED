@@ -6,6 +6,9 @@ BASED
 
 A Client-Server messaging application build using Python GUI and Socket Programming while implementing Hybrid Post-Quantum Encryption and KEP.
 
+Promotional Video:
+
+[Final Year Project Promotion Video - BASED](https://www.youtube.com/watch?v=x_GzwbPovq8)
   
 
 What is this project?
