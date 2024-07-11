@@ -219,7 +219,7 @@ _Note that in picture below, the client on the left is "test123" and the client 
 How does the crypto thingy works here?...
 =========================================
 
-The thesis of this project can be read here : [Fikri A., "Implementation of Hybrid Post-Quantum Encryption on Communication Platform," _College of Computing and Informatics, Universiti Tenaga Nasional_, pp. 196, Jul. 2024](https://github.com/r3tr0-02/BASED/Assets/CGEB4323_CS_Report_CS01081173(final draft)(SIGNED) v0.6.pdf)
+The thesis of this project can be read here : [Fikri A., "Implementation of Hybrid Post-Quantum Encryption on Communication Platform," _College of Computing and Informatics, Universiti Tenaga Nasional_, pp. 196, Jul. 2024](https://github.com/r3tr0-02/BASED/blob/main/Assets/CGEB4323_CS_Report_CS01081173(final%20draft)(SIGNED)%20v0.6.pdf)
 
   
 
