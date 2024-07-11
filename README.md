@@ -22,7 +22,7 @@ _Current mitigation on this threat is to encapsulate current cryptographic schem
 
 A proof-of-concept is to build a bare instant messaging platform where two parties can communicate in one session; with the mitigation implemented. Oversimplifying, the users will perform a Key Exchange Protocol, in which in it has a layer of Key Encapsulation Mechanism. The output is a secret key that both mutually share and can be used for encrypting subsequent messages in the session. Additionally, all messages are digitally signed on send and verified on receive using a Digital Signature Algorithm.
 
-For more detailed information on how this PoC works (because you are a crypto nerd or you are just bored), refer [here](https://github.com/r3tr0-02/BASED/tree/main?tab=readme-ov-file#-how-does-the-crypto-thingy-works-here-)
+For more detailed information on how this PoC works (because you are a crypto nerd or you are just bored), refer [here](https://github.com/r3tr0-02/BASED#how-does-the-crypto-thingy-works-here)
 
   
 
@@ -219,7 +219,7 @@ _Note that in picture below, the client on the left is "test123" and the client 
 How does the crypto thingy works here?...
 =========================================
 
-The thesis of this project can be read here :
+The thesis of this project can be read here : [Fikri A., "Implementation of Hybrid Post-Quantum Encryption on Communication Platform," _College of Computing and Informatics, Universiti Tenaga Nasional_, pp. 196, Jul. 2024](https://github.com/r3tr0-02/BASED/Assets/CGEB4323_CS_Report_CS01081173(final draft)(SIGNED) v0.6.pdf)
 
   
 
